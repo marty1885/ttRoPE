@@ -14,9 +14,9 @@ inline vFloat approx_exp(vFloat x)
     return ckernel::sfpu::_sfpu_exp_21f_<true>(x);
 }
 
-inline vFloat vector_sin(vFloat x)
+inline vFloat vector_sin_phase(vFloat x)
 {
-    vFloat v = x * ckernel::sfpu::FRAC_1_PI;
+    vFloat v = x;
     vInt whole_v = float_to_int16(v, 0);
     v -= int32_to_float(whole_v, 0);
 
@@ -40,9 +40,10 @@ inline void rope_face(int pos, int D, int vec_offset)
         vFloat freq = approx_exp(term_to_exp);
 
         // Standard RoPE math
-        vFloat angle = float(pos) * freq; // FIXME: Somehow accuracy issue here. `freq` is fine. But not `angle` compared to CPU
-        vFloat sin_angle = vector_sin(angle);
-        vFloat cos_angle = vector_sin(ckernel::sfpu::PI_2 - angle);
+        // FIXME: Somehow accuracy issue here. `freq` is fine. But not `angle` compared to CPU. The range reduction helps a little
+        vFloat angle = (int32_to_float(pos) * ckernel::sfpu::FRAC_1_PI * freq);
+        vFloat sin_angle = vector_sin_phase(angle);
+        vFloat cos_angle = vector_sin_phase(0.5f - angle);
 
         // Thanks that dst interleaves lanes by default
         vFloat x = dst_reg[i*2];
