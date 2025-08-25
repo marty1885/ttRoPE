@@ -40,8 +40,8 @@ inline void rope_face(int pos, int D, int vec_offset)
         vFloat freq = approx_exp(term_to_exp);
 
         // Standard RoPE math
-        // FIXME: Somehow accuracy issue here. `freq` is fine. But not `angle` compared to CPU. The range reduction helps a little
-        vFloat angle = (int32_to_float(pos) * ckernel::sfpu::FRAC_1_PI * freq);
+        // FIXME: Somehow accuracy issue here. `freq` is fine. But after multipling with `freq` and everything blows up.
+        vFloat angle = ckernel::sfpu::FRAC_1_PI * int32_to_float(pos) * freq;
         vFloat sin_angle = vector_sin_phase(angle);
         vFloat cos_angle = vector_sin_phase(0.5f - angle);
 
@@ -50,7 +50,7 @@ inline void rope_face(int pos, int D, int vec_offset)
         vFloat y = dst_reg[i*2+1];
 
         dst_reg[i*2] = x * cos_angle - y * sin_angle;
-        dst_reg[i*2+1] =  x * sin_angle + y * cos_angle;
+        dst_reg[i*2+1] = x * sin_angle + y * cos_angle;
     }
 }
 
@@ -89,6 +89,7 @@ void MAIN {
         for(uint32_t j = 0; j < n_tiles_width; j++) {
             cb_wait_front(cb_in0, 1);
             tile_regs_acquire();
+            copy_tile_init(cb_in0);
             copy_tile(cb_in0, 0, 0);
             MATH(rope_tile(1000, n_tiles_width * 32));
             tile_regs_commit();

@@ -55,7 +55,7 @@ std::vector<float> cpu_rope(const std::vector<float>& vec, int pos, size_t D, si
         size_t offset = n * D;
         for (size_t i = 0; i < D; i += 2) {
             float exponent = i / float(D);
-            float e =  std::log(std::exp(exponent) * 10000.f);
+            // float e =  std::log(std::exp(exponent) * 10000.f);
             float freq = 1.0f / std::pow(10000.0f, exponent);
 
             float angle = pos * freq;
@@ -67,8 +67,6 @@ std::vector<float> cpu_rope(const std::vector<float>& vec, int pos, size_t D, si
 
             result[offset + i] = x * cos_angle - y * sin_angle;
             result[offset + i + 1] = x * sin_angle + y * cos_angle;
-            // result[offset + i] = angle;
-            // result[offset + i + 1] = angle;
         }
     }
 
