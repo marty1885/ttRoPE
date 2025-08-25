@@ -47,15 +47,14 @@ CBHandle MakeCircularBufferBFP16(Program& program, const CoreSpec& core, tt::CBI
     return MakeCircularBuffer(program, core, cb, n_tiles * tile_size, tile_size, tt::DataFormat::Float16_b);
 }
 
-std::vector<float> cpu_rope(const std::vector<float>& vec, int pos, size_t D, size_t N)
+std::vector<float> cpu_rope(const std::vector<float>& vec, int pos, size_t D, size_t D_active, size_t N)
 {
     assert(D % 2 == 0 && "Dimension must be even");
     std::vector<float> result(vec.size());
     for(size_t n = 0; n < N; ++n) {
         size_t offset = n * D;
-        for (size_t i = 0; i < D; i += 2) {
+        for (size_t i = 0; i < D_active; i += 2) {
             float exponent = i / float(D);
-            // float e =  std::log(std::exp(exponent) * 10000.f);
             float freq = 1.0f / std::pow(10000.0f, exponent);
 
             float angle = pos * freq;
@@ -68,6 +67,8 @@ std::vector<float> cpu_rope(const std::vector<float>& vec, int pos, size_t D, si
             result[offset + i] = x * cos_angle - y * sin_angle;
             result[offset + i + 1] = x * sin_angle + y * cos_angle;
         }
+
+        memcpy(result.data() + offset + D_active, vec.data() + offset + D_active, (D - D_active) * sizeof(float));
     }
 
     return result;
@@ -119,11 +120,14 @@ int main()
 
     CommandQueue& cq = device->command_queue();
 
-    constexpr size_t D = 32;
+    constexpr size_t D = 64;
+    constexpr size_t D_active = 32;
     constexpr size_t N = 32;
     static_assert(D % 32 == 0 && N % 32 == 0);
+    static_assert(D >= D_active);
     constexpr uint32_t Dt = D/32;
     constexpr uint32_t Nt = N/32;
+    constexpr uint32_t D_activet = D_active/32;
     auto src = MakeBuffer(device, Dt * Nt, sizeof(float));
     auto dst = MakeBuffer(device, Dt * Nt, sizeof(float));
 
@@ -133,7 +137,7 @@ int main()
     for(auto& v : src_vec) {
         v = dist(rng);
     }
-    std::cout << "\n";
+    // std::cout << "\n";
 
     std::vector<float> tilized_src = convert_layout(tt::stl::Span<const float>(src_vec), {N, D}, TensorLayoutType::LIN_ROW_MAJOR, TensorLayoutType::TILED_NFACES);
     EnqueueWriteBuffer(cq, src, tilized_src, false);
@@ -161,9 +165,9 @@ int main()
         .fp32_dest_acc_en = true,
     });
 
-    SetRuntimeArgs(program, reader, core, std::vector<uint32_t>{src->address(), Dt, Dt, Nt});
-    SetRuntimeArgs(program, compute, core, std::vector<uint32_t>{Dt, Dt, Nt});
-    SetRuntimeArgs(program, writer, core, std::vector<uint32_t>{dst->address(), Dt, Dt, Nt});
+    SetRuntimeArgs(program, reader, core, std::vector<uint32_t>{src->address(), D_activet, Dt, Nt});
+    SetRuntimeArgs(program, compute, core, std::vector<uint32_t>{D_activet, Dt, Nt});
+    SetRuntimeArgs(program, writer, core, std::vector<uint32_t>{dst->address(), D_activet, Dt, Nt});
 
     EnqueueProgram(cq, program, true);
 
@@ -175,12 +179,13 @@ int main()
     //     std::cout << v << " ";
     // }
     // std::cout << "\n";
+    // std::cout << "size: " << result_vec.size() << "\n";
 
     std::vector<float> in(src_vec.size());
     for(size_t i = 0; i < src_vec.size(); i++) {
         in[i] = src_vec[i];
     }
-    auto reference = cpu_rope(in, 1000, D, N);
+    auto reference = cpu_rope(in, 1000, D, D_active, N);
 
     if(reference.size() != result_vec.size()) {
         std::cerr << "Error: Result size mismatch" << std::endl;

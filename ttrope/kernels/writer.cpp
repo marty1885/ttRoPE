@@ -5,7 +5,6 @@ void kernel_main() {
     uint32_t n_tiles_width_active = get_arg_val<uint32_t>(1);
     uint32_t n_tiles_width = get_arg_val<uint32_t>(2);
     uint32_t n_tiles_height = get_arg_val<uint32_t>(3);
-    uint32_t sram_tmp_tile_addr = get_arg_val<uint32_t>(4);
 
     constexpr uint32_t cb_out0 = tt::CBIndex::c_16;
     const uint32_t tile_size_bytes = get_tile_size(cb_out0);

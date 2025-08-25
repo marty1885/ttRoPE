@@ -51,18 +51,20 @@ inline void rope_face(int pos, int D, int vec_offset)
 
         dst_reg[i*2] = x * cos_angle - y * sin_angle;
         dst_reg[i*2+1] = x * sin_angle + y * cos_angle;
+        // result[offset + i] = x * cos_angle - y * sin_angle;
+        // result[offset + i + 1] = x * sin_angle + y * cos_angle;
     }
 }
 
-inline void rope_tile(int pos, int D)
+inline void rope_tile(int pos, int D, int vec_offset)
 {
 
     math::set_dst_write_addr<DstTileLayout::Default, DstTileShape::Tile32x32>(0);
     math::set_addr_mod_base();
     TTI_STALLWAIT(p_stall::STALL_SFPU, p_stall::MATH);
-
+;
     for (int face = 0; face < 4; face++) {
-        rope_face(pos, D, (face % 2 == 0) ? 0 : 16);
+        rope_face(pos, D, vec_offset + ((face % 2 == 0) ? 0 : 16));
         TTI_SETRWC(p_setrwc::CLR_NONE, p_setrwc::CR_D, 8, 0, 0, p_setrwc::SET_D);
         TTI_SETRWC(p_setrwc::CLR_NONE, p_setrwc::CR_D, 8, 0, 0, p_setrwc::SET_D);
     }
@@ -91,7 +93,9 @@ void MAIN {
             tile_regs_acquire();
             copy_tile_init(cb_in0);
             copy_tile(cb_in0, 0, 0);
-            MATH(rope_tile(1000, n_tiles_width * 32));
+            if(j < n_tiles_width_active) {
+                MATH(rope_tile(1000, n_tiles_width * 32, j * 32));
+            }
             tile_regs_commit();
             tile_regs_wait();
 
@@ -102,7 +106,6 @@ void MAIN {
             cb_push_back(cb_out0, 1);
             cb_pop_front(cb_in0, 1);
         }
-
     }
 
 }
