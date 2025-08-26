@@ -55,6 +55,7 @@ std::vector<float> cpu_rope(const std::vector<float>& vec, int pos, size_t D, si
         size_t offset = n * D;
         for (size_t i = 0; i < D_active; i += 2) {
             float exponent = i / float(D);
+            float term_to_exp = -exponent * 9.21034037f;
             float freq = 1.0f / std::pow(10000.0f, exponent);
 
             float angle = pos * freq;
@@ -186,10 +187,10 @@ int main()
         float refv = reference[i];
         float resv = result_vec[i];
         if(std::abs(refv - resv) > 1e-1) {
-            std::cerr << "-- Index " << i << ": Reference value " << refv << ", Result value " << resv << std::endl;
+            // std::cerr << "-- Index " << i << ": Reference value " << refv << ", Result value " << resv << std::endl;
         }
         else {
-            std::cout << "idx " << i << " ok. value = " << refv << std::endl;
+            // std::cout << "idx " << i << " ok. value = " << refv << std::endl;
             correct_count++;
         }
     }
@@ -198,7 +199,7 @@ int main()
     std::cout << "PCC: " << check_vector_pcc(reference, result_vec) << "\n";
 
     // std::ofstream o("outputdata.csv");
-    // o << "device_freq,device_term,cpu_freq,cpu_term\n";
+    // o << "device_term,device_freq,cpu_term,cpu_freq\n";
     // for(size_t i = 0; i < result_vec.size(); i+=2) {
     //     o << std::to_string(result_vec[i]) << "," << std::to_string(result_vec[i+1]) << "," << std::to_string(reference[i]) << "," << std::to_string(reference[i+1]) << "\n";
     // }

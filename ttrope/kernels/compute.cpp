@@ -29,10 +29,10 @@ inline vFloat vector_exp(sfpi::vFloat val) {
         vInt POLY_D3;
 
         v_if(zif > 0x00600000) {
-                // Fourth segment (highest values of the mantissa)
-                POLY_D1 = 0.52496276e-7f;
-                POLY_D2 = 0x81354a;
-                POLY_D3 = 0x10a440;
+            // Fourth segment (highest values of the mantissa)
+            POLY_D1 = 0.52496276e-7f;
+            POLY_D2 = 0x81354a;
+            POLY_D3 = 0x10a440;
         }
         v_elseif(zif > 0x00400000) {
             // Third segment
@@ -68,8 +68,86 @@ inline vFloat vector_exp(sfpi::vFloat val) {
         y = sfpi::reinterpret<sfpi::vFloat>(zii);
     }
     v_endif;
+
+    // Special case handling beacuse SFPU is fun
+    v_if(val == 0.f) {
+        y = 1.0f;
+    }
+    // When result is beteen 0.5 and 0.6 - error shoots up for no reason. PlanB, linear approximation
+    constexpr float log05 = -0.69314718;
+    constexpr float log06 = -0.51082562;
+    v_elseif(val >= log05 && val <= log06) {
+        // linear approximation
+        constexpr float bottom = 0.5;
+        constexpr float top = 0.6;
+        constexpr float slope = top - bottom;
+        vFloat v = bottom + slope * (val - log05) * (1.f / (log06 - log05));
+        // 2nd degree polinomial fix for the quirks (calculated) with ROOT
+        // Chi2                      =  8.71765e-08
+        // NDf                       =          669
+        // p0                        =     0.273396   +/-   0.000166952
+        // p1                        =     -1.00195   +/-   0.000608745
+        // p2                        =     0.910408   +/-   0.000553597
+
+        v += 0.273396f + v * (-1.00195f + v * 0.910408f);
+        y = v;
+    }
+    constexpr float log03 = -1.3862944f;
+    constexpr float log035 = -1.2039728;
+    v_elseif(val >= log03 && val <= log035) {
+        // linear approximation
+        constexpr float bottom = 0.25;
+        constexpr float top = 0.3;
+        constexpr float slope = top - bottom;
+        vFloat v = bottom + slope * (val - log03) * (1.f / (log035 - log03));
+        // 2nd degree polinomial fix for the quirks (calculated) with ROOT
+        // Chi2                      =   2.1806e-08
+        // NDf                       =          669
+        // p0                        =     0.136781   +/-   8.3594e-05
+        // p1                        =     -1.00255   +/-   0.000609257
+        // p2                        =       1.8219   +/-   0.00110749
+
+        v += 0.136781f + v * (-1.00255f + v * 1.8219f);
+        y = v;
+    }
+    constexpr float log015 = -1.8971200;
+    constexpr float log0125 = -2.0794415;
+    v_elseif(val >= log0125 && val <= log015) {
+        // linear approximation
+        constexpr float bottom = 0.125;
+        constexpr float top = 0.15;
+        constexpr float slope = top - bottom;
+        vFloat v = bottom + slope * (val - log0125) * (1.f / (log015 - log0125));
+        // 2nd degree polinomial fix for the quirks (calculated) with ROOT
+        // Chi2                      =  5.97236e-09
+        // NDf                       =          669
+        // p0                        =    0.0684603   +/-   4.37996e-05
+        // p1                        =     -1.00358   +/-   0.000638082
+        // p2                        =      3.64761   +/-   0.00231846
+        v += 0.0684603f + v * (-1.00358f + v * 3.64761f);
+        y = v;
+    }
+    constexpr float log00625 = -2.7725887;
+    constexpr float log0075 = -2.5902672;
+    v_elseif(val >= log00625 && val <= log0075) {
+        // linear approximation
+        constexpr float bottom = 0.0625;
+        constexpr float top = 0.075;
+        constexpr float slope = top - bottom;
+        vFloat v = bottom + slope * (val - log00625) * (1.f / (log0075 - log00625));
+        // 2nd degree polinomial fix for the quirks (calculated) with ROOT
+        // Chi2                      =  1.47702e-09
+        // NDf                       =          669
+        // p0                        =    0.0341861   +/-   2.18062e-05
+        // p1                        =     -1.00229   +/-   0.000634992
+        // p2                        =      7.28583   +/-   0.00461184
+        v += 0.0341861f + v * (-1.00229f + v * 7.28583f);
+        y = v;
+    }
+    v_endif;
     return y;
 }
+
 
 inline vFloat vector_sin_phase(vFloat x)
 {
