@@ -33,15 +33,15 @@ inline void rope_face(int pos, int D, int vec_offset)
         vFloat block_lane_id = int32_to_float((vConstTileId & 15) + vec_offset); // No mod operator on SFPI, use bit hack
         vFloat exponent = block_lane_id * inv_d;
 
-        // Standard RoPE forumla freq = 1.f / pow(10000, exponent). We don't have pow(x, y) in SFPU. Rewrite formula
-        // freq = 1.f / exp(exponent * log(10000))
-        // freq = exp(-exponent * log(10000.0f))
-        vFloat term_to_exp = -exponent * 9.21034037f;
+        // RoPE formula freq = exp(-exponent * log(10000.0f)).
+        // The angle is calculated as angle = (pos * freq) / PI.
+        // To improve FPU accuracy, we can rewrite this as:
+        // angle = pos * exp(-exponent * log(10000) + log(1/PI))
+        vFloat term_to_exp = -exponent * 9.21034037f - 1.14472988585f; // log(10000) = 9.21034037, log(1/PI) = -1.14472988585
         vFloat freq = approx_exp(term_to_exp);
 
         // Standard RoPE math
-        // FIXME: Somehow accuracy issue here. `freq` is fine. But after multipling with `freq` and everything blows up.
-        vFloat angle = ckernel::sfpu::FRAC_1_PI * int32_to_float(pos) * freq;
+        vFloat angle = int32_to_float(pos) * freq;
         vFloat sin_angle = vector_sin_phase(angle);
         vFloat cos_angle = vector_sin_phase(0.5f - angle);
 
