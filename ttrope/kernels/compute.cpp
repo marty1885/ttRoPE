@@ -9,9 +9,66 @@
 #ifdef TRISC_MATH
 using namespace sfpi;
 
-inline vFloat approx_exp(vFloat x)
-{
-    return ckernel::sfpu::_sfpu_exp_21f_<true>(x);
+// Implemented algorithm exp_f24 from https://ieeexplore.ieee.org/document/9810030
+inline vFloat vector_exp(sfpi::vFloat val) {
+    sfpi::vFloat y = 0.0f;
+    // Intermediary values can overflow if input value is below -88.0f, which leads to output increasing again instead
+    // of staying at 0. This overflow happens when `log2(e) * val < 127.0f`, which correspond to `val < 88.0f`
+    v_if(val > -88.0f) {
+        // The paper relies on the following formula (c.f. Section 2 and 3 of paper):
+        // z = (bias + x * factor * N_m; where:
+        // factor = 0x00b8aa3b (computed through log(e))
+        // bias = 0x3f800000
+        sfpi::vInt z = sfpu::_float_to_int32_(val * sfpi::vFloat(0x00b8aa3b) + sfpi::vFloat(0x3f800000));
+        sfpi::vInt zii = exexp(sfpi::reinterpret<sfpi::vFloat>(z));         // Extract exponent
+        sfpi::vInt zif = sfpi::exman9(sfpi::reinterpret<sfpi::vFloat>(z));  // Extract mantissa
+
+        // Polynomial coefficients for approximation of exp on [1; 2]
+        vFloat POLY_D1;
+        vInt POLY_D2;
+        vInt POLY_D3;
+
+        v_if(zif > 0x00600000) {
+                // Fourth segment (highest values of the mantissa)
+                POLY_D1 = 0.52496276e-7f;
+                POLY_D2 = 0x81354a;
+                POLY_D3 = 0x10a440;
+        }
+        v_elseif(zif > 0x00400000) {
+            // Third segment
+            POLY_D1 = 0.4414393e-7f;
+            POLY_D2 = 0xcdf4b4;
+            POLY_D3 = 0x3e4d6;
+        }
+        v_elseif(zif > 0x00200000) {
+            // Second segment
+            POLY_D1 =0.37120473e-7f;
+            POLY_D2 = 0x1113a74;
+            POLY_D3 = 0x9f16;
+        }
+        v_else {
+            // First segment (lowest values of the mantissa)
+            POLY_D1 = 0.40196114e-7f;
+            POLY_D2 = 0xf94ee7;
+            // Note: The original C code adds a float constant here.
+            POLY_D3 = 0x560e;
+        }
+        v_endif;
+
+        sfpi::vFloat d1 = sfpi::vFloat(POLY_D1);
+        sfpi::vFloat d2 = sfpi::int32_to_float(sfpi::vInt(POLY_D2) + zif, 0);
+        sfpi::vFloat d3 = sfpi::int32_to_float(sfpi::vInt(POLY_D3) + zif, 0);
+        d2 = d1 * d2;
+        zif = sfpu::_float_to_int32_(d2 * d3);
+
+        // Restore exponent
+        zii = sfpi::reinterpret<sfpi::vInt>(
+            sfpi::setexp(sfpi::reinterpret<sfpi::vFloat>(zif), 127U + zii));  // restore exponent
+
+        y = sfpi::reinterpret<sfpi::vFloat>(zii);
+    }
+    v_endif;
+    return y;
 }
 
 inline vFloat vector_sin_phase(vFloat x)
@@ -37,11 +94,11 @@ inline void rope_face(int pos, int D, int vec_offset)
         // The angle is calculated as angle = (pos * freq) / PI.
         // To improve FPU accuracy, we can rewrite this as:
         // angle = pos * exp(-exponent * log(10000) + log(1/PI))
-        vFloat term_to_exp = -exponent * 9.21034037f - 1.14472988585f; // log(10000) = 9.21034037, log(1/PI) = -1.14472988585
-        vFloat freq = approx_exp(term_to_exp);
+        vFloat term_to_exp = -exponent * 9.21034037f; // log(10000) = 9.21034037, log(1/PI) = -1.14472988585
+        vFloat freq = vector_exp(term_to_exp);
 
         // Standard RoPE math
-        vFloat angle = int32_to_float(pos) * freq;
+        vFloat angle = ckernel::sfpu::FRAC_1_PI * int32_to_float(pos) * freq;
         vFloat sin_angle = vector_sin_phase(angle);
         vFloat cos_angle = vector_sin_phase(0.5f - angle);
 

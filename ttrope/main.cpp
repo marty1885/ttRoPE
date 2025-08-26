@@ -121,7 +121,7 @@ int main()
     CommandQueue& cq = device->command_queue();
 
     constexpr size_t D = 64;
-    constexpr size_t D_active = 32;
+    constexpr size_t D_active = 64;
     constexpr size_t N = 32;
     static_assert(D % 32 == 0 && N % 32 == 0);
     static_assert(D >= D_active);
@@ -175,18 +175,7 @@ int main()
     EnqueueReadBuffer(cq, dst, result_vec_tiled, true);
     std::vector<float> result_vec = convert_layout(tt::stl::Span<const float>(result_vec_tiled), {N, D}, TensorLayoutType::TILED_NFACES, TensorLayoutType::LIN_ROW_MAJOR);
 
-    // for(auto v : result_vec) {
-    //     std::cout << v << " ";
-    // }
-    // std::cout << "\n";
-    // std::cout << "size: " << result_vec.size() << "\n";
-
-    std::vector<float> in(src_vec.size());
-    for(size_t i = 0; i < src_vec.size(); i++) {
-        in[i] = src_vec[i];
-    }
-    auto reference = cpu_rope(in, 1000, D, D_active, N);
-
+    auto reference = cpu_rope(src_vec, 1000, D, D_active, N);
     if(reference.size() != result_vec.size()) {
         std::cerr << "Error: Result size mismatch" << std::endl;
         return 0;
@@ -207,4 +196,10 @@ int main()
     std::cout << "\n";
     std::cout << "OK: " << correct_count << "/" << result_vec.size() << ", precentage: " << (float)correct_count / result_vec.size() * 100 << "%" << std::endl;
     std::cout << "PCC: " << check_vector_pcc(reference, result_vec) << "\n";
+
+    // std::ofstream o("outputdata.csv");
+    // o << "device_freq,device_term,cpu_freq,cpu_term\n";
+    // for(size_t i = 0; i < result_vec.size(); i+=2) {
+    //     o << std::to_string(result_vec[i]) << "," << std::to_string(result_vec[i+1]) << "," << std::to_string(reference[i]) << "," << std::to_string(reference[i+1]) << "\n";
+    // }
 }
