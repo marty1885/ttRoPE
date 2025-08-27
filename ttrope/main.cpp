@@ -120,7 +120,7 @@ int main()
 
     CommandQueue& cq = device->command_queue();
 
-    constexpr size_t D = 64;
+    constexpr size_t D = 256;
     constexpr size_t D_active = 64;
     constexpr size_t N = 32;
     static_assert(D % 32 == 0 && N % 32 == 0);
@@ -133,7 +133,6 @@ int main()
     static_assert(Nt > 0);
     auto src = MakeBuffer(device, Dt * Nt, sizeof(float));
     auto dst = MakeBuffer(device, Dt * Nt, sizeof(float));
-    static_assert(D == D_active); // TODO: Fix partial RoPE support
 
     std::vector<float> src_vec(N * D);
     std::mt19937 rng(std::random_device{}());
@@ -151,6 +150,7 @@ int main()
 
     MakeCircularBufferFP32(program, core, tt::CBIndex::c_0, 4);
     MakeCircularBufferFP32(program, core, tt::CBIndex::c_16, 4);
+    MakeCircularBufferFP32(program, core, tt::CBIndex::c_17, 4);
 
     std::vector<uint32_t> reader_compile_time_args;
     TensorAccessorArgs(*src).append_to(reader_compile_time_args);
