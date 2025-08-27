@@ -96,11 +96,11 @@ inline void rope_face(int pos, int D, int vec_offset)
         // The angle is calculated as angle = (pos * freq) / PI.
         // To improve FPU accuracy, we can rewrite this as:
         // angle = pos * exp(-exponent * log(10000) + log(1/PI))
-        vFloat term_to_exp = -exponent * 9.21034037f; // log(10000) = 9.21034037, log(1/PI) = -1.14472988585
+        vFloat term_to_exp = -exponent * 9.21034037f - 1.14472988585; // log(10000) = 9.21034037, log(1/PI) = -1.14472988585
         vFloat freq = vector_exp(term_to_exp);
 
         // Standard RoPE math
-        vFloat angle = ckernel::sfpu::FRAC_1_PI * int32_to_float(pos) * freq;
+        vFloat angle = int32_to_float(pos) * freq;
         vFloat sin_angle = vector_sin_phase(angle);
         vFloat cos_angle = vector_sin_phase(0.5f - angle);
 

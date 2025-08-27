@@ -120,7 +120,7 @@ int main()
 
     CommandQueue& cq = device->command_queue();
 
-    constexpr size_t D = 256;
+    constexpr size_t D = 64;
     constexpr size_t D_active = 64;
     constexpr size_t N = 32;
     static_assert(D % 32 == 0 && N % 32 == 0);
