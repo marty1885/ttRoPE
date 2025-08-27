@@ -50,9 +50,8 @@ inline vFloat vector_exp(sfpi::vFloat val) {
             // First segment
             POLY_D1 = 0.31214472e-7f;
             POLY_D2 = 0x151d842;
-            // Note: The original C code has a float constant here WTF?
-            // This following number is found via a guess the author did something
-            // stupid and added a floating point notation after the real value.
+            // Note: The original C code has a float constant here
+            // We treat it as an integer for performance
             POLY_D3 = 328;
         }
         v_endif;
