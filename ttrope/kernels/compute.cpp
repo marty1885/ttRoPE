@@ -47,7 +47,7 @@ inline vFloat vector_exp(sfpi::vFloat val) {
             POLY_D3 = 0x9f16;
         }
         v_else {
-            // First segment (lowest values of the mantissa)
+            // First segment
             POLY_D1 = 0.40196114e-7f;
             POLY_D2 = 0xf94ee7;
             // Note: The original C code adds a float constant here.
@@ -73,76 +73,55 @@ inline vFloat vector_exp(sfpi::vFloat val) {
     v_if(val == 0.f) {
         y = 1.0f;
     }
-    // When result is beteen 0.5 and 0.6 - error shoots up for no reason. PlanB, linear approximation
+    // When result is beteen certain values - error shoots up for no reason.
+    // For such cases we go PlanB, approximation in the interval via a 2nd degree polynomial
+    // The terms are found using ROOT and the Fit() function
     constexpr float log05 = -0.69314718;
     constexpr float log06 = -0.51082562;
     v_elseif(val >= log05 && val <= log06) {
-        // linear approximation
-        constexpr float bottom = 0.5;
-        constexpr float top = 0.6;
-        constexpr float slope = top - bottom;
-        vFloat v = bottom + slope * (val - log05) * (1.f / (log06 - log05));
-        // 2nd degree polinomial fix for the quirks (calculated) with ROOT
-        // Chi2                      =  8.71765e-08
-        // NDf                       =          669
-        // p0                        =     0.273396   +/-   0.000166952
-        // p1                        =     -1.00195   +/-   0.000608745
-        // p2                        =     0.910408   +/-   0.000553597
-
-        v += 0.273396f + v * (-1.00195f + v * 0.910408f);
-        y = v;
+        // Chi2                      =  1.16082e-08
+        // NDf                       =           97
+        // p0                        =     0.977028   +/-   0.000156131
+        // p1                        =     0.878108   +/-   0.000521543
+        // p2                        =     0.274027   +/-   0.000432848
+        y = (0.274027 * val * val) + (0.878108 * val) + 0.977028;
     }
-    constexpr float log03 = -1.3862944f;
-    constexpr float log035 = -1.2039728;
-    v_elseif(val >= log03 && val <= log035) {
-        // linear approximation
-        constexpr float bottom = 0.25;
-        constexpr float top = 0.3;
-        constexpr float slope = top - bottom;
-        vFloat v = bottom + slope * (val - log03) * (1.f / (log035 - log03));
-        // 2nd degree polinomial fix for the quirks (calculated) with ROOT
-        // Chi2                      =   2.1806e-08
-        // NDf                       =          669
-        // p0                        =     0.136781   +/-   8.3594e-05
-        // p1                        =     -1.00255   +/-   0.000609257
-        // p2                        =       1.8219   +/-   0.00110749
+    constexpr float log025 = -1.3862944f;
+    constexpr float log03 = -1.2039728;
+    v_elseif(val >= log025 && val <= log03) {
+        // Chi2                      =  2.90205e-09
+        // NDf                       =           97
+        // p0                        =     0.858672   +/-   0.000362657
+        // p1                        =     0.628995   +/-   0.000560691
+        // p2                        =     0.137014   +/-   0.000216424
 
-        v += 0.136781f + v * (-1.00255f + v * 1.8219f);
-        y = v;
+        y = (0.137014 * val * val) + (0.628995 * val) + 0.858672;
     }
     constexpr float log015 = -1.8971200;
     constexpr float log0125 = -2.0794415;
     v_elseif(val >= log0125 && val <= log015) {
-        // linear approximation
-        constexpr float bottom = 0.125;
-        constexpr float top = 0.15;
-        constexpr float slope = top - bottom;
-        vFloat v = bottom + slope * (val - log0125) * (1.f / (log015 - log0125));
-        // 2nd degree polinomial fix for the quirks (calculated) with ROOT
-        // Chi2                      =  5.97236e-09
-        // NDf                       =          669
-        // p0                        =    0.0684603   +/-   4.37996e-05
-        // p1                        =     -1.00358   +/-   0.000638082
-        // p2                        =      3.64761   +/-   0.00231846
-        v += 0.0684603f + v * (-1.00358f + v * 3.64761f);
-        y = v;
+        // Chi2                      =  7.25348e-10
+        // NDf                       =           97
+        // p0                        =     0.680244   +/-   0.000427559
+        // p1                        =     0.409469   +/-   0.000430294
+        // p2                        =    0.0685069   +/-   0.0001082
+        y = (0.0685069 * val * val) + (0.409469 * val) + 0.680244;
     }
-    constexpr float log00625 = -2.7725887;
-    constexpr float log0075 = -2.5902672;
-    v_elseif(val >= log00625 && val <= log0075) {
-        // linear approximation
-        constexpr float bottom = 0.0625;
-        constexpr float top = 0.075;
-        constexpr float slope = top - bottom;
-        vFloat v = bottom + slope * (val - log00625) * (1.f / (log0075 - log00625));
-        // 2nd degree polinomial fix for the quirks (calculated) with ROOT
-        // Chi2                      =  1.47702e-09
-        // NDf                       =          669
-        // p0                        =    0.0341861   +/-   2.18062e-05
-        // p1                        =     -1.00229   +/-   0.000634992
-        // p2                        =      7.28583   +/-   0.00461184
-        v += 0.0341861f + v * (-1.00229f + v * 7.28583f);
-        y = v;
+    constexpr float log01 = -2.3025851;
+    constexpr float log002 = -3.9120230;
+    v_elseif(val >= log002 && val <= log01) {
+        // Chi2                      =  2.69422e-09
+        // NDf                       =           95
+        // p0                        =     0.810285   +/-   0.00142067
+        // p1                        =     0.637924   +/-   0.00187739
+        // p2                        =     0.205647   +/-   0.000921902
+        // p3                        =    0.0315954   +/-   0.000199411
+        // p4                        =   0.00192001   +/-   1.6035e-05
+        y = 0.00192001 * val * val * val * val;
+        y += 0.0315954 * val * val * val;
+        y += 0.205647 * val * val;
+        y += 0.637924 * val;
+        y += 0.810285;
     }
     v_endif;
     return y;
