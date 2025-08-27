@@ -29,7 +29,6 @@ CPMAddPackage(
     NAME yaml-cpp
     GITHUB_REPOSITORY jbeder/yaml-cpp
     GIT_TAG 0.8.0
-    PATCHES yaml-cpp.patch
     OPTIONS
         "YAML_CPP_BUILD_TESTS OFF"
         "YAML_CPP_BUILD_TOOLS OFF"
@@ -65,15 +64,13 @@ CPMAddPackage(NAME fmt GITHUB_REPOSITORY fmtlib/fmt GIT_TAG 11.1.4)
 # magic_enum : https://github.com/Neargye/magic_enum
 ############################################################################################################################
 
-include(FetchContent)
-
-FetchContent_Declare(
-    enchantum
+CPMAddPackage(
+    NAME enchantum
     GIT_REPOSITORY https://github.com/ZXShady/enchantum.git
     GIT_TAG 8ca5b0eb7e7ebe0252e5bc6915083f1dd1b8294e
+    OPTIONS
+        "CMAKE_MESSAGE_LOG_LEVEL NOTICE"
 )
-
-FetchContent_MakeAvailable(enchantum)
 
 ############################################################################################################################
 # nlohmann/json : https://github.com/nlohmann/json
@@ -96,30 +93,32 @@ CPMAddPackage(
 include(${PROJECT_SOURCE_DIR}/dependencies/fetch_cli11.cmake)
 
 # gersemi: off
-# CPMAddPackage(
-#     NAME msgpack
-#     GIT_REPOSITORY https://github.com/msgpack/msgpack-c.git
-#     GIT_TAG cpp-6.1.0
-#     PATCH msgpack.patch
-#     OPTIONS
-#         "CMAKE_MESSAGE_LOG_LEVEL NOTICE"
-#         "MSGPACK_BUILD_EXAMPLES OFF"
-#         "MSGPACK_BUILD_TESTS OFF"
-#         "MSGPACK_BUILD_DOCS OFF"
-#         "MSGPACK_ENABLE_CXX ON"
-#         "MSGPACK_USE_BOOST OFF"
-#         "MSGPACK_BUILD_HEADER_ONLY ON"
-#         "MSGPACK_ENABLE_SHARED OFF"
-#         "MSGPACK_ENABLE_STATIC OFF"
-#         "MSGPACK_CXX20 ON"
-#         "MSGPACK_NO_BOOST ON"
-# )
+CPMAddPackage(
+    NAME msgpack
+    GIT_REPOSITORY https://github.com/msgpack/msgpack-c.git
+    GIT_TAG cpp-6.1.0
+    PATCH_COMMAND
+        patch --dry-run -p1 -R < ${CMAKE_CURRENT_LIST_DIR}/msgpack.patch || patch -p1 < ${CMAKE_CURRENT_LIST_DIR}/msgpack.patch
+    OPTIONS
+        "CMAKE_MESSAGE_LOG_LEVEL NOTICE"
+        "MSGPACK_BUILD_EXAMPLES OFF"
+        "MSGPACK_BUILD_TESTS OFF"
+        "MSGPACK_BUILD_DOCS OFF"
+        "MSGPACK_ENABLE_CXX ON"
+        "MSGPACK_USE_BOOST OFF"
+        "MSGPACK_BUILD_HEADER_ONLY ON"
+        "MSGPACK_ENABLE_SHARED OFF"
+        "MSGPACK_ENABLE_STATIC OFF"
+        "MSGPACK_CXX20 ON"
+        "MSGPACK_NO_BOOST ON"
+)
 
 CPMAddPackage(
     NAME tokenizers-cpp
     GITHUB_REPOSITORY mlc-ai/tokenizers-cpp
-    GIT_TAG 5de6f656c06da557d4f0fb1ca611b16d6e9ff11d
-    PATCH tokenizers-cpp.patch
+    GIT_TAG 55d53aa38dc8df7d9c8bd9ed50907e82ae83ce66
+    PATCH_COMMAND
+        patch --dry-run -p1 -R < ${CMAKE_CURRENT_LIST_DIR}/tokenizers-cpp.patch || patch -p1 < ${CMAKE_CURRENT_LIST_DIR}/tokenizers-cpp.patch
     OPTIONS
         "CMAKE_MESSAGE_LOG_LEVEL NOTICE"
 )
