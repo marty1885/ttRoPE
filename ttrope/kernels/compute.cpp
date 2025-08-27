@@ -48,10 +48,12 @@ inline vFloat vector_exp(sfpi::vFloat val) {
         }
         v_else {
             // First segment
-            POLY_D1 = 0.40196114e-7f;
-            POLY_D2 = 0xf94ee7;
-            // Note: The original C code adds a float constant here.
-            POLY_D3 = 0x560e;
+            POLY_D1 = 0.31214472e-7f;
+            POLY_D2 = 0x151d842;
+            // Note: The original C code has a float constant here WTF?
+            // This following number is found via a guess the author did something
+            // stupid and added a floating point notation after the real value.
+            POLY_D3 = 328;
         }
         v_endif;
 
@@ -66,62 +68,6 @@ inline vFloat vector_exp(sfpi::vFloat val) {
             sfpi::setexp(sfpi::reinterpret<sfpi::vFloat>(zif), 127U + zii));  // restore exponent
 
         y = sfpi::reinterpret<sfpi::vFloat>(zii);
-    }
-    v_endif;
-
-    // Special case handling beacuse SFPU is fun
-    v_if(val == 0.f) {
-        y = 1.0f;
-    }
-    // When result is beteen certain values - error shoots up for no reason.
-    // For such cases we go PlanB, approximation in the interval via a 2nd degree polynomial
-    // The terms are found using ROOT and the Fit() function
-    constexpr float log05 = -0.69314718;
-    constexpr float log06 = -0.51082562;
-    v_elseif(val >= log05 && val <= log06) {
-        // Chi2                      =  1.16082e-08
-        // NDf                       =           97
-        // p0                        =     0.977028   +/-   0.000156131
-        // p1                        =     0.878108   +/-   0.000521543
-        // p2                        =     0.274027   +/-   0.000432848
-        y = (0.274027 * val * val) + (0.878108 * val) + 0.977028;
-    }
-    constexpr float log025 = -1.3862944f;
-    constexpr float log03 = -1.2039728;
-    v_elseif(val >= log025 && val <= log03) {
-        // Chi2                      =  2.90205e-09
-        // NDf                       =           97
-        // p0                        =     0.858672   +/-   0.000362657
-        // p1                        =     0.628995   +/-   0.000560691
-        // p2                        =     0.137014   +/-   0.000216424
-
-        y = (0.137014 * val * val) + (0.628995 * val) + 0.858672;
-    }
-    constexpr float log015 = -1.8971200;
-    constexpr float log0125 = -2.0794415;
-    v_elseif(val >= log0125 && val <= log015) {
-        // Chi2                      =  7.25348e-10
-        // NDf                       =           97
-        // p0                        =     0.680244   +/-   0.000427559
-        // p1                        =     0.409469   +/-   0.000430294
-        // p2                        =    0.0685069   +/-   0.0001082
-        y = (0.0685069 * val * val) + (0.409469 * val) + 0.680244;
-    }
-    constexpr float log01 = -2.3025851;
-    constexpr float log002 = -3.9120230;
-    v_elseif(val >= log002 && val <= log01) {
-        // Chi2                      =  2.69422e-09
-        // NDf                       =           95
-        // p0                        =     0.810285   +/-   0.00142067
-        // p1                        =     0.637924   +/-   0.00187739
-        // p2                        =     0.205647   +/-   0.000921902
-        // p3                        =    0.0315954   +/-   0.000199411
-        // p4                        =   0.00192001   +/-   1.6035e-05
-        y = 0.00192001 * val * val * val * val;
-        y += 0.0315954 * val * val * val;
-        y += 0.205647 * val * val;
-        y += 0.637924 * val;
-        y += 0.810285;
     }
     v_endif;
     return y;
