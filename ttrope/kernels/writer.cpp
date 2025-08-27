@@ -1,3 +1,4 @@
+#include <cinttypes>
 #include <cstdint>
 
 void kernel_main() {
@@ -13,13 +14,15 @@ void kernel_main() {
 
 
     for(uint32_t h = 0; h < n_tiles_height; h++) {
-        for(uint32_t w = 0; w < n_tiles_width; w++) {
+        for(uint32_t w = 0; w < n_tiles_width_active/2; w++) {
+            cb_wait_front(cb_out0, 2);
             uint32_t tile_idx = h * n_tiles_width + w;
-            cb_wait_front(cb_out0, 1);
+            uint32_t tile_idx2 = h * n_tiles_width + (w + n_tiles_width_active/2);
             uint32_t cb_out_addr = get_read_ptr(cb_out0);
             noc_async_write_tile(tile_idx, dst, cb_out_addr);
+            noc_async_write_tile(tile_idx2, dst, cb_out_addr + tile_size_bytes);
             noc_async_write_barrier();
-            cb_pop_front(cb_out0, 1);
+            cb_pop_front(cb_out0, 2);
         }
     }
 }

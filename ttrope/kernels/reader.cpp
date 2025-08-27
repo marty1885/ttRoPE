@@ -9,17 +9,24 @@ void kernel_main() {
     constexpr uint32_t cb_in0 = tt::CBIndex::c_0;
     const uint32_t tile_size_bytes = get_tile_size(cb_in0);
     constexpr auto src_args = TensorAccessorArgs<0>();
-    const auto src = TensorAccessor(src_args, src_addr, tile_size_bytes);
+    // const auto src = TensorAccessor(src_args, src_addr, tile_size_bytes);
+    auto src = InterleavedAddrGenFast<true>{
+        .bank_base_address = src_addr,
+        .page_size = tile_size_bytes,
+        .data_format = DataFormat::Float32
+    };
 
 
-    for(uint32_t h = 0; h < n_tiles_height; h++) {
-        for(uint32_t w = 0; w < n_tiles_width; w++) {
-            uint32_t tile_idx = h * n_tiles_width + w;
-            cb_reserve_back(cb_in0, 1);
-            uint32_t cb_src_addr = get_write_ptr(cb_in0);
-            noc_async_read_tile(tile_idx, src, cb_src_addr);
-            noc_async_read_barrier();
-            cb_push_back(cb_in0, 1);
-        }
+for(uint32_t h = 0; h < n_tiles_height; h++) {
+    for(uint32_t w = 0; w < n_tiles_width_active/2; w++) {
+        cb_reserve_back(cb_in0, 2);
+        uint32_t cb_src_addr = get_write_ptr(cb_in0);
+        uint32_t tile_idx = h * n_tiles_width + w;
+        noc_async_read_tile(tile_idx, src, cb_src_addr);
+        uint32_t tile_idx2 = h * n_tiles_width + (w + n_tiles_width_active/2);
+        noc_async_read_tile(tile_idx2, src, cb_src_addr + tile_size_bytes);
+        noc_async_read_barrier();
+        cb_push_back(cb_in0, 2);
+    }
     }
 }

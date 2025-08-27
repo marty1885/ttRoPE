@@ -88,9 +88,9 @@ inline vFloat vector_sin_phase(vFloat x)
 inline void rope_face(int pos, int D, int vec_offset)
 {
     float inv_d = 1.f/D;
-    for (int i = 0; i < 4; i++) {
-        vFloat block_lane_id = int32_to_float((vConstTileId & 15) + vec_offset); // No mod operator on SFPI, use bit hack
-        vFloat exponent = block_lane_id * inv_d;
+    for (int i = 0; i < 8; i++) {
+        vFloat block_lane_id = int32_to_float((vConstTileId & 15) + vec_offset + i % 2); // No mod operator on SFPI, use bit hack
+        vFloat exponent = block_lane_id * 0.5f * inv_d ;
 
         // RoPE formula freq = exp(-exponent * log(10000.0f)).
         // The angle is calculated as angle = (pos * freq) / PI.
@@ -104,12 +104,10 @@ inline void rope_face(int pos, int D, int vec_offset)
         vFloat sin_angle = vector_sin_phase(angle);
         vFloat cos_angle = vector_sin_phase(0.5f - angle);
 
-        // Thanks that dst interleaves lanes by default
-        vFloat x = dst_reg[i*2];
-        vFloat y = dst_reg[i*2+1];
-
-        dst_reg[i*2] = x * cos_angle - y * sin_angle;
-        dst_reg[i*2+1] = x * sin_angle + y * cos_angle;
+        vFloat x = dst_reg[i];
+        vFloat y = dst_reg[i+32];
+        dst_reg[i] = x * cos_angle - y * sin_angle;
+        dst_reg[i+32] = x * sin_angle + y * cos_angle;
         // result[offset + i] = x * cos_angle - y * sin_angle;
         // result[offset + i + 1] = x * sin_angle + y * cos_angle;
     }
@@ -147,23 +145,23 @@ void MAIN {
     init_sfpu(tt::CBIndex::c_0, tt::CBIndex::c_16);
     exp_tile_init();
     for(uint32_t i = 0; i < n_tiles_height; i++) {
-        for(uint32_t j = 0; j < n_tiles_width; j++) {
-            cb_wait_front(cb_in0, 1);
+        for(uint32_t j = 0; j < n_tiles_width_active/2; j++) {
+            cb_wait_front(cb_in0, 2);
             tile_regs_acquire();
             copy_tile_init(cb_in0);
             copy_tile(cb_in0, 0, 0);
-            if(j < n_tiles_width_active) {
-                MATH(rope_tile(1000, n_tiles_width * 32, j * 32));
-            }
+            copy_tile(cb_in0, 1, 1);
+            MATH(rope_tile(1000, n_tiles_width_active*32, j*32));
             tile_regs_commit();
             tile_regs_wait();
 
-            cb_reserve_back(cb_out0, 1);
+            cb_reserve_back(cb_out0, 2);
             pack_reconfig_data_format(cb_out0);
-            pack_tile(0, cb_out0);
+            pack_tile(0, cb_out0, 0);
+            pack_tile(1, cb_out0, 1);
             tile_regs_release();
-            cb_push_back(cb_out0, 1);
-            cb_pop_front(cb_in0, 1);
+            cb_push_back(cb_out0, 2);
+            cb_pop_front(cb_in0, 2);
         }
     }
 

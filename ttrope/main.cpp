@@ -27,8 +27,7 @@ std::shared_ptr<Buffer> MakeBuffer(IDevice* device, uint32_t size, uint32_t page
 using CoreSpec = std::variant<CoreCoord, CoreRange, CoreRangeSet>;
 std::shared_ptr<Buffer> MakeBuffer(IDevice* device, uint32_t n_tiles, size_t element_size, bool sram = false) {
     const uint32_t tile_size = element_size * TILE_WIDTH * TILE_HEIGHT;
-    const uint32_t page_tiles = sram ? n_tiles : 1;
-    return MakeBuffer(device, tile_size * n_tiles, page_tiles * tile_size, sram);
+    return MakeBuffer(device, tile_size * n_tiles, tile_size, sram);
 }
 
 CBHandle MakeCircularBuffer(
@@ -53,8 +52,8 @@ std::vector<float> cpu_rope(const std::vector<float>& vec, int pos, size_t D, si
     std::vector<float> result(vec.size());
     for(size_t n = 0; n < N; ++n) {
         size_t offset = n * D;
-        for (size_t i = 0; i < D_active; i += 2) {
-            float exponent = i / float(D);
+        for (size_t i = 0; i < D_active/2; i ++) {
+            float exponent = (float)i / D_active / 2;
             float term_to_exp = -exponent * 9.21034037f;
             float freq = 1.0f / std::pow(10000.0f, exponent);
 
@@ -63,10 +62,10 @@ std::vector<float> cpu_rope(const std::vector<float>& vec, int pos, size_t D, si
             float sin_angle = std::sin(angle);
 
             float x = vec[offset + i];
-            float y = vec[offset + i + 1];
+            float y = vec[offset + i + D_active/2];
 
             result[offset + i] = x * cos_angle - y * sin_angle;
-            result[offset + i + 1] = x * sin_angle + y * cos_angle;
+            result[offset + i + D_active/2] = x * sin_angle + y * cos_angle;
         }
 
         memcpy(result.data() + offset + D_active, vec.data() + offset + D_active, (D - D_active) * sizeof(float));
@@ -129,8 +128,12 @@ int main()
     constexpr uint32_t Dt = D/32;
     constexpr uint32_t Nt = N/32;
     constexpr uint32_t D_activet = D_active/32;
+    static_assert(D_activet % 2 == 0 && D_activet > 0);
+    static_assert(Dt > 0);
+    static_assert(Nt > 0);
     auto src = MakeBuffer(device, Dt * Nt, sizeof(float));
     auto dst = MakeBuffer(device, Dt * Nt, sizeof(float));
+    static_assert(D == D_active); // TODO: Fix partial RoPE support
 
     std::vector<float> src_vec(N * D);
     std::mt19937 rng(std::random_device{}());
@@ -138,10 +141,13 @@ int main()
     for(auto& v : src_vec) {
         v = dist(rng);
     }
-    // std::cout << "\n";
 
     std::vector<float> tilized_src = convert_layout(tt::stl::Span<const float>(src_vec), {N, D}, TensorLayoutType::LIN_ROW_MAJOR, TensorLayoutType::TILED_NFACES);
-    EnqueueWriteBuffer(cq, src, tilized_src, false);
+    EnqueueWriteBuffer(cq, src, tilized_src, true);
+
+    std::vector<float> wiper(N * D, -2);
+    EnqueueWriteBuffer(cq, dst, wiper, true);
+
 
     MakeCircularBufferFP32(program, core, tt::CBIndex::c_0, 4);
     MakeCircularBufferFP32(program, core, tt::CBIndex::c_16, 4);
@@ -200,7 +206,11 @@ int main()
 
     // std::ofstream o("outputdata.csv");
     // o << "device_term,device_freq,cpu_term,cpu_freq\n";
-    // for(size_t i = 0; i < result_vec.size(); i+=2) {
-    //     o << std::to_string(result_vec[i]) << "," << std::to_string(result_vec[i+1]) << "," << std::to_string(reference[i]) << "," << std::to_string(reference[i+1]) << "\n";
+    // size_t sz = result_vec.size();
+    // for(size_t n = 0; n < N; n++) {
+    //     for(size_t d = 0; d < D/2; d++) {
+    //         size_t offset = n*D + d;
+    //         o << std::to_string(result_vec[offset]) << "," << std::to_string(result_vec[offset + D/2]) << "," << std::to_string(reference[offset]) << "," << std::to_string(reference[offset + D/2]) << "\n";
+    //     }
     // }
 }
