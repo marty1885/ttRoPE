@@ -53,8 +53,7 @@ std::vector<float> cpu_rope(const std::vector<float>& vec, int pos, size_t D, si
     for(size_t n = 0; n < N; ++n) {
         size_t offset = n * D;
         for (size_t i = 0; i < D_active/2; i ++) {
-            float exponent = (float)i / D_active / 2;
-            float term_to_exp = -exponent * 9.21034037f;
+            float exponent = 2.0f * i / D_active;
             float freq = 1.0f / std::pow(10000.0f, exponent);
 
             float angle = pos * freq;

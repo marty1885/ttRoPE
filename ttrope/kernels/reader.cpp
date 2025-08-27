@@ -10,12 +10,7 @@ void kernel_main() {
     constexpr uint32_t cb_bypass = tt::CBIndex::c_17;
     const uint32_t tile_size_bytes = get_tile_size(cb_in0);
     constexpr auto src_args = TensorAccessorArgs<0>();
-    // const auto src = TensorAccessor(src_args, src_addr, tile_size_bytes);
-    auto src = InterleavedAddrGenFast<true>{
-        .bank_base_address = src_addr,
-        .page_size = tile_size_bytes,
-        .data_format = DataFormat::Float32
-    };
+    const auto src = TensorAccessor(src_args, src_addr, tile_size_bytes);
 
 
     for(uint32_t h = 0; h < n_tiles_height; h++) {

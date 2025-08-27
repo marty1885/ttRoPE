@@ -72,7 +72,6 @@ inline vFloat vector_exp(sfpi::vFloat val) {
     return y;
 }
 
-
 inline vFloat vector_sin_phase(vFloat x)
 {
     vFloat v = x;
@@ -85,12 +84,12 @@ inline vFloat vector_sin_phase(vFloat x)
     return v;
 }
 
-inline void rope_face(int pos, int D, int vec_offset)
+inline void rope_face(int pos, int D_active, int vec_offset)
 {
-    float inv_d = 1.f/D;
+    float inv_d = 1.f/D_active;
     for (int i = 0; i < 8; i++) {
         vFloat block_lane_id = int32_to_float((vConstTileId & 15) + vec_offset + i % 2); // No mod operator on SFPI, use bit hack
-        vFloat exponent = block_lane_id * 0.5f * inv_d ;
+        vFloat exponent = 2.f * block_lane_id * inv_d;
 
         // RoPE formula freq = exp(-exponent * log(10000.0f)).
         // The angle is calculated as angle = (pos * freq) / PI.
@@ -113,7 +112,7 @@ inline void rope_face(int pos, int D, int vec_offset)
     }
 }
 
-inline void rope_tile(int pos, int D, int vec_offset)
+inline void rope_tile(int pos, int D_active, int vec_offset)
 {
 
     math::set_dst_write_addr<DstTileLayout::Default, DstTileShape::Tile32x32>(0);
@@ -121,7 +120,7 @@ inline void rope_tile(int pos, int D, int vec_offset)
     TTI_STALLWAIT(p_stall::STALL_SFPU, p_stall::MATH);
 ;
     for (int face = 0; face < 4; face++) {
-        rope_face(pos, D, vec_offset + ((face % 2 == 0) ? 0 : 16));
+        rope_face(pos, D_active, vec_offset + ((face % 2 == 0) ? 0 : 16));
         TTI_SETRWC(p_setrwc::CLR_NONE, p_setrwc::CR_D, 8, 0, 0, p_setrwc::SET_D);
         TTI_SETRWC(p_setrwc::CLR_NONE, p_setrwc::CR_D, 8, 0, 0, p_setrwc::SET_D);
     }
