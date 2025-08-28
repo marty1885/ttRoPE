@@ -141,10 +141,10 @@ int main()
     }
 
     std::vector<float> tilized_src = convert_layout(tt::stl::Span<const float>(src_vec), {N, D}, TensorLayoutType::LIN_ROW_MAJOR, TensorLayoutType::TILED_NFACES);
-    EnqueueWriteBuffer(cq, src, tilized_src, true);
+    EnqueueWriteBuffer(cq, src, tilized_src, false);
 
     std::vector<float> wiper(N * D, -2);
-    EnqueueWriteBuffer(cq, dst, wiper, true);
+    EnqueueWriteBuffer(cq, dst, wiper, false);
 
 
     MakeCircularBufferFP32(program, core, tt::CBIndex::c_0, 4);
