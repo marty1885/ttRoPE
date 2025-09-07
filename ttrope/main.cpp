@@ -8,6 +8,7 @@
 #include <tt-metalium/program.hpp>
 #include <tt-metalium/tensor_accessor_args.hpp>
 #include <tt-metalium/tilize_utils.hpp>
+#include <tt-metalium/tt_metal_profiler.hpp>
 
 using namespace tt::tt_metal;
 
@@ -119,8 +120,8 @@ int main()
 
     CommandQueue& cq = device->command_queue();
 
-    constexpr size_t D = 64;
-    constexpr size_t D_active = 64;
+    constexpr size_t D = 2048;
+    constexpr size_t D_active = 256;
     constexpr size_t N = 32;
     static_assert(D % 32 == 0 && N % 32 == 0);
     static_assert(D >= D_active);
@@ -176,6 +177,8 @@ int main()
     SetRuntimeArgs(program, writer, core, std::vector<uint32_t>{dst->address(), D_activet, Dt, Nt});
 
     EnqueueProgram(cq, program, true);
+
+    // tt::tt_metal::detail::ReadDeviceProfilerResults(device);
 
     std::vector<float> result_vec_tiled;
     EnqueueReadBuffer(cq, dst, result_vec_tiled, true);

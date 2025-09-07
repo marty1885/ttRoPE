@@ -6,6 +6,8 @@
 #include "compute_kernel_api/eltwise_unary/trigonometry.h"
 #include <array>
 
+#include <tools/profiler/kernel_profiler.hpp>
+
 #ifdef TRISC_MATH
 using namespace sfpi;
 
@@ -84,56 +86,66 @@ inline vFloat vector_sin_phase(vFloat x)
     return v;
 }
 
-inline void rope_face(int pos, int D_active, int vec_offset)
+inline void rope_face(int pos, float inv_d, int vec_offset)
 {
-    float inv_d = 1.f/D_active;
-    for (int i = 0; i < 8; i++) {
-        vFloat block_lane_id = int32_to_float((vConstTileId & 15) + vec_offset + i % 2); // No mod operator on SFPI, use bit hack
-        vFloat exponent = 2.f * block_lane_id * inv_d;
+    DeviceZoneScopedN("ROPE-FACE");
+    // RoPE - we need to calculate the final rotation sin(angle) and cos(angle)
+    // Where andgle = pos * freq
+    // and freq = pow(100000, 2.0f * i / DIM_SIZE)
+    //
+    // To improve SFPU accuracy (and better prformance), we can rewrite the
+    // compute as the following using a few identities:
+    // evaulate sin_phase(angle_phase) and cos_phase(angle_phase)
+    // angle_phase = pos * pow(10000, 2.0f * i / DIM_SIZE) / PI
+    //             = pos * exp(-(2.0f * i / DIM_SIZE) * log(10000)) / PI
+    //             = pos * exp(-(2.0f * i / DIM_SIZE) * log(10000) + log(1/PI))
+    // where we compute
+    //     exponent = 2.0f * i / DIM_SIZE
+    // and
+    //     log(10000) = 9.21034037, log(1/PI) = -1.14472988585
+    // thus
+    // angle_phase = pos * exp(-exponent * 9.21034037f - 1.14472988585f)
+    // and
+    //      we preload 9.21034037f and 1.14472988585f into vConstFloatPrgm{0,1}
+    //      to avoid loading values into LReg in runtime
+    // NOTE: SFPU does not have a / operator. Scalars can be done on RISC-V (softfp)
+    //      which is slow. So the value is computed once and loaded into
+    //      vConstFloatPrg2. Reused across the kernel.
+    // TODO: DIM_SIZE should be treated as a constant and this 1.f/DIM_SIZE can be
+    //      evaulated at compile time.
+    for (int h = 0; h < 2; h++) {
+        vFloat block_lane_id = int32_to_float((vConstTileId & 15) + (vec_offset + h)); // No mod operator on SFPI, use bit hack
+        vFloat exponent = block_lane_id * vConstFloatPrgm2;
 
-        // RoPE - we need to calculate the final rotation sin(angle) and cos(angle)
-        // Where andgle = pos * freq
-        // and freq = pow(100000, 2.0f * i / DIM_SIZE)
-        //
-        // To improve SFPU accuracy (and better prformance), we can rewrite the
-        // compute as the following using a few identities:
-        // evaulate sin_phase(angle_phase) and cos_phase(angle_phase)
-        // angle_phase = pos * pow(10000, 2.0f * i / DIM_SIZE) / PI
-        //             = pos * exp(-(2.0f * i / DIM_SIZE) * log(10000)) / PI
-        //             = pos * exp(-(2.0f * i / DIM_SIZE) * log(10000) + log(1/PI))
-        // where we compute
-        //     exponent = 2.0f * i / DIM_SIZE
-        // and
-        //     log(10000) = 9.21034037, log(1/PI) = -1.14472988585
-        // thus
-        // angle_phase = pos * exp(-exponent * 9.21034037f - 1.14472988585f)
-        // NOTE: SFPU does not have a / operator. Scalars can be done on RISC-V (softfp)
-        // or needs to be subsitued or use an approximation of the inverse
-        vFloat term_to_exp = -exponent * 9.21034037f - 1.14472988585f;
+        vFloat term_to_exp = -exponent * vConstFloatPrgm0 - vConstFloatPrgm1;
         vFloat freq = vector_exp(term_to_exp);
+        for (int i = 0; i < 4; i++) {
+            // Standard RoPE math
+            vFloat angle_phase = int32_to_float(pos) * freq;
+            vFloat sin_value = vector_sin_phase(angle_phase);
+            vFloat cos_value = vector_sin_phase(0.5f - angle_phase);
 
-        // Standard RoPE math
-        vFloat angle_phase = int32_to_float(pos) * freq;
-        vFloat sin_value = vector_sin_phase(angle_phase);
-        vFloat cos_value = vector_sin_phase(0.5f - angle_phase);
-
-        vFloat x = dst_reg[i];
-        vFloat y = dst_reg[i+32];
-        dst_reg[i] = x * cos_value - y * sin_value;
-        dst_reg[i+32] = x * sin_value + y * cos_value;
-        // result[offset + i] = x * cos_value - y * sin_value;
-        // result[offset + i + 1] = x * sin_value + y * cos_value;
+            size_t idx = i*2+h;
+            vFloat x = dst_reg[idx];
+            vFloat y = dst_reg[idx+32];
+            dst_reg[idx] = x * cos_value - y * sin_value;
+            dst_reg[idx+32] = x * sin_value + y * cos_value;
+        }
     }
 }
 
-inline void rope_tile(int pos, int D_active, int vec_offset)
+inline void rope_tile(int pos, float inv_d, int vec_offset)
 {
+    vConstFloatPrgm0 = 9.21034037f;
+    vConstFloatPrgm1 = 1.14472988585f;
+    vConstFloatPrgm2 = inv_d;
+    DeviceZoneScopedN("ROPE-TILE");
     math::set_dst_write_addr<DstTileLayout::Default, DstTileShape::Tile32x32>(0);
     math::set_addr_mod_base();
     TTI_STALLWAIT(p_stall::STALL_SFPU, p_stall::MATH);
 
     for (int face = 0; face < 4; face++) {
-        rope_face(pos, D_active, vec_offset + ((face % 2 == 0) ? 0 : 16));
+        rope_face(pos, inv_d, vec_offset + ((face % 2 == 0) ? 0 : 16));
         TTI_SETRWC(p_setrwc::CLR_NONE, p_setrwc::CR_D, 8, 0, 0, p_setrwc::SET_D);
         TTI_SETRWC(p_setrwc::CLR_NONE, p_setrwc::CR_D, 8, 0, 0, p_setrwc::SET_D);
     }
@@ -155,7 +167,7 @@ void MAIN {
     constexpr uint32_t cb_out0 = tt::CBIndex::c_16;
 
     init_sfpu(tt::CBIndex::c_0, tt::CBIndex::c_16);
-    exp_tile_init();
+    float inv_d = 1.f/(n_tiles_width_active * (32 / 2));
     for(uint32_t i = 0; i < n_tiles_height; i++) {
         for(uint32_t j = 0; j < n_tiles_width_active/2; j++) {
             cb_wait_front(cb_in0, 2);
@@ -163,7 +175,7 @@ void MAIN {
             copy_tile_init(cb_in0);
             copy_tile(cb_in0, 0, 0);
             copy_tile(cb_in0, 1, 1);
-            MATH(rope_tile(1000, n_tiles_width_active*32, j*32));
+            MATH(rope_tile(1000, inv_d, j*32));
             tile_regs_commit();
             tile_regs_wait();
 
