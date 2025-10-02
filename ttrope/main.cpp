@@ -29,8 +29,9 @@ std::shared_ptr<distributed::MeshBuffer> MakeBuffer(const std::shared_ptr<distri
 
 
 using CoreSpec = std::variant<CoreCoord, CoreRange, CoreRangeSet>;
-std::shared_ptr<distributed::MeshBuffer> MakeBuffer(const std::shared_ptr<distributed::MeshDevice>& device, uint32_t n_tiles, size_t element_size, bool sram = false) {
-    const uint32_t tile_size = element_size * TILE_WIDTH * TILE_HEIGHT;
+template <typename T>
+std::shared_ptr<distributed::MeshBuffer> MakeBuffer(const std::shared_ptr<distributed::MeshDevice>& device, uint32_t n_tiles, bool sram = false) {
+    const uint32_t tile_size = sizeof(T) * TILE_WIDTH * TILE_HEIGHT;
     return MakeBuffer(device, tile_size * n_tiles, tile_size, sram);
 }
 
@@ -133,8 +134,8 @@ int main()
     static_assert(D_activet % 2 == 0 && D_activet > 0);
     static_assert(Dt > 0);
     static_assert(Nt > 0);
-    auto src = MakeBuffer(device, Dt * Nt, sizeof(float));
-    auto dst = MakeBuffer(device, Dt * Nt, sizeof(float));
+    auto src = MakeBuffer<float>(device, Dt * Nt);
+    auto dst = MakeBuffer<float>(device, Dt * Nt);
 
     std::vector<float> src_vec(N * D);
     std::mt19937 rng(std::random_device{}());
