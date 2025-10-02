@@ -153,8 +153,9 @@ int main()
     distributed::EnqueueWriteMeshBuffer(cq, dst, wiper, false);
 
     std::vector<int32_t> idx_vec(N);
+    std::uniform_int_distribution<int> idist(0, 4096);
     for(size_t i = 0; i < N; ++i) {
-        idx_vec[i] = 1000+i;
+        idx_vec[i] = idist(rng);
     }
     distributed::EnqueueWriteMeshBuffer(cq, idxs, idx_vec, false);
 
@@ -194,8 +195,6 @@ int main()
     distributed::EnqueueMeshWorkload(cq, workload, /*blocking=*/false);
     distributed::Finish(cq);
 
-    // tt::tt_metal::detail::ReadDeviceProfilerResults(device);
-
     std::vector<float> result_vec_tiled;
     distributed::EnqueueReadMeshBuffer(cq, result_vec_tiled, dst, true);
     std::vector<float> result_vec = convert_layout(tt::stl::Span<const float>(result_vec_tiled), {N, D}, TensorLayoutType::TILED_NFACES, TensorLayoutType::LIN_ROW_MAJOR);
@@ -222,13 +221,13 @@ int main()
     std::cout << "OK: " << correct_count << "/" << result_vec.size() << ", precentage: " << (float)correct_count / result_vec.size() * 100 << "%" << std::endl;
     std::cout << "PCC: " << check_vector_pcc(reference, result_vec) << "\n";
 
-    std::ofstream o("outputdata.csv");
-    o << "device_term,device_freq,cpu_term,cpu_freq\n";
-    size_t sz = result_vec.size();
-    for(size_t n = 0; n < N; n++) {
-        for(size_t d = 0; d < D/2; d++) {
-            size_t offset = n*D + d;
-            o << std::to_string(result_vec[offset]) << "," << std::to_string(result_vec[offset + D/2]) << "," << std::to_string(reference[offset]) << "," << std::to_string(reference[offset + D/2]) << "\n";
-        }
-    }
+    // std::ofstream o("outputdata.csv");
+    // o << "device_term,device_freq,cpu_term,cpu_freq\n";
+    // size_t sz = result_vec.size();
+    // for(size_t n = 0; n < N; n++) {
+    //     for(size_t d = 0; d < D/2; d++) {
+    //         size_t offset = n*D + d;
+    //         o << std::to_string(result_vec[offset]) << "," << std::to_string(result_vec[offset + D/2]) << "," << std::to_string(reference[offset]) << "," << std::to_string(reference[offset + D/2]) << "\n";
+    //     }
+    // }
 }
