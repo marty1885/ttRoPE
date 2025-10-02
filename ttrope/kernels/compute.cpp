@@ -89,14 +89,17 @@ inline vFloat vector_sin_phase(vFloat x)
 inline vFloat load_into_row(int* ptr)
 {
     vInt row_mask = vConstTileId & (~15);
-    vFloat v = 0;
-    #pragma gcc unroll 0
-    for(int i=0;i<4;i++) {
-        v_if(row_mask == i*16) {
-            v = ptr[i];
-        }
-        v_endif;
+    vFloat v = ptr[0];
+    v_if(row_mask == 16) {
+        v = ptr[1];
     }
+    v_elseif(row_mask == 32) {
+        v = ptr[2];
+    }
+    v_elseif(row_mask == 48) {
+        v = ptr[3];
+    }
+    v_endif;
     return v;
 }
 
@@ -198,12 +201,6 @@ void MAIN {
     int* idxs = nullptr;
     cb_get_tile(cb_in1, 0, &idxs);
     idxs += 4; // WHY?
-
-    // #ifdef TRISC_MATH
-    // for(uint32_t i=0;i<n_tiles_height*32;i++) {
-    //     DPRINT << idxs[i] << ENDL();
-    // }
-    // #endif
 
     for(uint32_t i = 0; i < n_tiles_height; i++) {
         for(uint32_t j = 0; j < n_tiles_width_active/2; j++) {
