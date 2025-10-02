@@ -134,11 +134,16 @@ inline void rope_face(int pos, float inv_d, int vec_offset)
     }
 }
 
-inline void rope_tile(int pos, float inv_d, int vec_offset)
+inline void rope_tile_init(float inv_d)
 {
     vConstFloatPrgm0 = 9.21034037f;
     vConstFloatPrgm1 = 1.14472988585f;
     vConstFloatPrgm2 = inv_d;
+}
+
+inline void rope_tile(int pos, float inv_d, int vec_offset)
+{
+    (void)inv_d; // Unused
     DeviceZoneScopedN("ROPE-TILE");
     math::set_dst_write_addr<DstTileLayout::Default, DstTileShape::Tile32x32>(0);
     math::set_addr_mod_base();
@@ -168,6 +173,7 @@ void MAIN {
 
     init_sfpu(tt::CBIndex::c_0, tt::CBIndex::c_16);
     float inv_d = 1.f/(n_tiles_width_active * (32 / 2));
+    MATH(rope_tile_init(inv_d));
     for(uint32_t i = 0; i < n_tiles_height; i++) {
         for(uint32_t j = 0; j < n_tiles_width_active/2; j++) {
             cb_wait_front(cb_in0, 2);
