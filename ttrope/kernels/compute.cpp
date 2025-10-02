@@ -86,7 +86,21 @@ inline vFloat vector_sin_phase(vFloat x)
     return v;
 }
 
-inline void rope_face(int pos, float inv_d, int vec_offset)
+inline vFloat load_into_row(int* ptr)
+{
+    vInt row_mask = vConstTileId & (~15);
+    vFloat v = 0;
+    #pragma gcc unroll 0
+    for(int i=0;i<4;i++) {
+        v_if(row_mask == i*16) {
+            v = ptr[i];
+        }
+        v_endif;
+    }
+    return v;
+}
+
+inline void rope_face(int* pos, float inv_d, int vec_offset)
 {
     DeviceZoneScopedN("ROPE-FACE");
     // RoPE - we need to calculate the final rotation sin(angle) and cos(angle)
@@ -120,8 +134,10 @@ inline void rope_face(int pos, float inv_d, int vec_offset)
         vFloat term_to_exp = -exponent * vConstFloatPrgm0 - vConstFloatPrgm1;
         vFloat freq = vector_exp(term_to_exp);
         for (int i = 0; i < 4; i++) {
+            vFloat vpos = load_into_row(pos+i*4);
+
             // Standard RoPE math
-            vFloat angle_phase = int32_to_float(pos) * freq;
+            vFloat angle_phase = vpos * freq;
             vFloat sin_value = vector_sin_phase(angle_phase);
             vFloat cos_value = vector_sin_phase(0.5f - angle_phase);
 
@@ -141,7 +157,7 @@ inline void rope_tile_init(float inv_d)
     vConstFloatPrgm2 = inv_d;
 }
 
-inline void rope_tile(int pos, float inv_d, int vec_offset)
+inline void rope_tile(int* pos, float inv_d, int vec_offset)
 {
     (void)inv_d; // Unused
     DeviceZoneScopedN("ROPE-TILE");
@@ -150,7 +166,9 @@ inline void rope_tile(int pos, float inv_d, int vec_offset)
     TTI_STALLWAIT(p_stall::STALL_SFPU, p_stall::MATH);
 
     for (int face = 0; face < 4; face++) {
-        rope_face(pos, inv_d, vec_offset + ((face % 2 == 0) ? 0 : 16));
+        int internal_offset = ((face % 2 == 0) ? 0 : 16);
+        int idx_offset = face > 1 ? 16 : 0;
+        rope_face(pos + idx_offset, inv_d, vec_offset + internal_offset);
         TTI_SETRWC(p_setrwc::CLR_NONE, p_setrwc::CR_D, 8, 0, 0, p_setrwc::SET_D);
         TTI_SETRWC(p_setrwc::CLR_NONE, p_setrwc::CR_D, 8, 0, 0, p_setrwc::SET_D);
     }
@@ -169,11 +187,24 @@ void MAIN {
     uint32_t n_tiles_height = get_arg_val<uint32_t>(2);
 
     constexpr uint32_t cb_in0 = tt::CBIndex::c_0;
+    constexpr uint32_t cb_in1 = tt::CBIndex::c_1;
     constexpr uint32_t cb_out0 = tt::CBIndex::c_16;
 
     init_sfpu(tt::CBIndex::c_0, tt::CBIndex::c_16);
     float inv_d = 1.f/(n_tiles_width_active * (32 / 2));
     MATH(rope_tile_init(inv_d));
+
+    cb_wait_front(cb_in1, 1);
+    int* idxs = nullptr;
+    cb_get_tile(cb_in1, 0, &idxs);
+    idxs += 4; // WHY?
+
+    // #ifdef TRISC_MATH
+    // for(uint32_t i=0;i<n_tiles_height*32;i++) {
+    //     DPRINT << idxs[i] << ENDL();
+    // }
+    // #endif
+
     for(uint32_t i = 0; i < n_tiles_height; i++) {
         for(uint32_t j = 0; j < n_tiles_width_active/2; j++) {
             cb_wait_front(cb_in0, 2);
@@ -181,7 +212,7 @@ void MAIN {
             copy_tile_init(cb_in0);
             copy_tile(cb_in0, 0, 0);
             copy_tile(cb_in0, 1, 1);
-            MATH(rope_tile(1000, inv_d, j*32));
+            MATH(rope_tile(idxs+32*i, inv_d, j*32));
             tile_regs_commit();
             tile_regs_wait();
 
@@ -194,6 +225,8 @@ void MAIN {
             cb_pop_front(cb_in0, 2);
         }
     }
+
+    cb_pop_front(cb_in1, 1);
 
 }
 }
