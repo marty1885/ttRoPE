@@ -1,32 +1,35 @@
 #include <cstdint>
+#include <memory>
 #include <random>
 #include <tt-metalium/core_coord.hpp>
 #include <tt-metalium/host_api.hpp>
 #include <tt-metalium/device.hpp>
 #include <tt-metalium/bfloat16.hpp>
 #include <tt-metalium/kernel_types.hpp>
+#include <tt-metalium/mesh_device.hpp>
 #include <tt-metalium/program.hpp>
 #include <tt-metalium/tensor_accessor_args.hpp>
 #include <tt-metalium/tilize_utils.hpp>
 #include <tt-metalium/tt_metal_profiler.hpp>
+#include <tt-metalium/distributed.hpp>
 
 using namespace tt::tt_metal;
 
 constexpr uint32_t TILE_WIDTH = 32;
 constexpr uint32_t TILE_HEIGHT = 32;
 
-std::shared_ptr<Buffer> MakeBuffer(IDevice* device, uint32_t size, uint32_t page_size, bool sram = false) {
-    InterleavedBufferConfig config{
-        .device = device,
-        .size = size,
-        .page_size = page_size,
-        .buffer_type = (sram ? BufferType::L1 : BufferType::DRAM)};
-    return CreateBuffer(config);
+std::shared_ptr<distributed::MeshBuffer> MakeBuffer(const std::shared_ptr<distributed::MeshDevice>& device, uint32_t size, uint32_t page_size, bool sram = false) {
+    distributed::DeviceLocalBufferConfig config{
+          .page_size = page_size,
+          .buffer_type = (sram ? BufferType::L1 : BufferType::DRAM)
+    };
+    distributed::ReplicatedBufferConfig buffer_config{.size = size};
+    return distributed::MeshBuffer::create(buffer_config, config, device.get());
 }
 
 
 using CoreSpec = std::variant<CoreCoord, CoreRange, CoreRangeSet>;
-std::shared_ptr<Buffer> MakeBuffer(IDevice* device, uint32_t n_tiles, size_t element_size, bool sram = false) {
+std::shared_ptr<distributed::MeshBuffer> MakeBuffer(const std::shared_ptr<distributed::MeshDevice>& device, uint32_t n_tiles, size_t element_size, bool sram = false) {
     const uint32_t tile_size = element_size * TILE_WIDTH * TILE_HEIGHT;
     return MakeBuffer(device, tile_size * n_tiles, tile_size, sram);
 }
@@ -112,13 +115,12 @@ inline float check_vector_pcc(const std::vector<float>& vec_a, const std::vector
 
 int main()
 {
-    IDevice* device = CreateDevice(0);
-    device->enable_program_cache();
+    auto device = distributed::MeshDevice::create_unit_mesh(0);
 
     Program program = CreateProgram();
     constexpr CoreCoord core = {0, 0};
 
-    CommandQueue& cq = device->command_queue();
+    auto& cq = device->mesh_command_queue();
 
     constexpr size_t D = 2048;
     constexpr size_t D_active = 256;
@@ -142,10 +144,10 @@ int main()
     }
 
     std::vector<float> tilized_src = convert_layout(tt::stl::Span<const float>(src_vec), {N, D}, TensorLayoutType::LIN_ROW_MAJOR, TensorLayoutType::TILED_NFACES);
-    EnqueueWriteBuffer(cq, src, tilized_src, false);
+    distributed::EnqueueWriteMeshBuffer(cq, src, tilized_src, false);
 
     std::vector<float> wiper(N * D, -2);
-    EnqueueWriteBuffer(cq, dst, wiper, false);
+    distributed::EnqueueWriteMeshBuffer(cq, dst, wiper, false);
 
 
     MakeCircularBufferFP32(program, core, tt::CBIndex::c_0, 4);
@@ -172,16 +174,20 @@ int main()
         .fp32_dest_acc_en = true,
     });
 
-    SetRuntimeArgs(program, reader, core, std::vector<uint32_t>{src->address(), D_activet, Dt, Nt});
+    SetRuntimeArgs(program, reader, core, std::vector<uint32_t>{(uint32_t)src->address(), D_activet, Dt, Nt});
     SetRuntimeArgs(program, compute, core, std::vector<uint32_t>{D_activet, Dt, Nt});
-    SetRuntimeArgs(program, writer, core, std::vector<uint32_t>{dst->address(), D_activet, Dt, Nt});
+    SetRuntimeArgs(program, writer, core, std::vector<uint32_t>{(uint32_t)dst->address(), D_activet, Dt, Nt});
 
-    EnqueueProgram(cq, program, true);
+    distributed::MeshWorkload workload;
+    distributed::MeshCoordinateRange device_range = distributed::MeshCoordinateRange(device->shape());
+    workload.add_program(device_range, std::move(program));
+    distributed::EnqueueMeshWorkload(cq, workload, /*blocking=*/false);
+    distributed::Finish(cq);
 
     // tt::tt_metal::detail::ReadDeviceProfilerResults(device);
 
     std::vector<float> result_vec_tiled;
-    EnqueueReadBuffer(cq, dst, result_vec_tiled, true);
+    distributed::EnqueueReadMeshBuffer(cq, result_vec_tiled, dst, true);
     std::vector<float> result_vec = convert_layout(tt::stl::Span<const float>(result_vec_tiled), {N, D}, TensorLayoutType::TILED_NFACES, TensorLayoutType::LIN_ROW_MAJOR);
 
     auto reference = cpu_rope(src_vec, 1000, D, D_active, N);
