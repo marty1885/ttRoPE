@@ -86,10 +86,10 @@ inline vFloat vector_sin_phase(vFloat x)
     return v;
 }
 
-inline vFloat load_into_row(int* ptr)
+inline vInt load_into_row(int* ptr)
 {
     vInt row_mask = vConstTileId & (~15);
-    vFloat v = ptr[0];
+    vInt v = ptr[0];
     v_if(row_mask == 16) {
         v = ptr[1];
     }
@@ -137,7 +137,7 @@ inline void rope_face(int* pos, float inv_d, int vec_offset)
         vFloat term_to_exp = -exponent * vConstFloatPrgm0 - vConstFloatPrgm1;
         vFloat freq = vector_exp(term_to_exp);
         for (int i = 0; i < 4; i++) {
-            vFloat vpos = load_into_row(pos+i*4);
+            vFloat vpos = int32_to_float(load_into_row(pos+i*4));
 
             // Standard RoPE math
             vFloat angle_phase = vpos * freq;
@@ -200,7 +200,7 @@ void MAIN {
     cb_wait_front(cb_in1, 1);
     int* idxs = nullptr;
     cb_get_tile(cb_in1, 0, &idxs);
-    idxs += 4; // WHY?
+    idxs += 4; // Need to shift because read ptr is off by 1 << 4 bytes in BBE
 
     for(uint32_t i = 0; i < n_tiles_height; i++) {
         for(uint32_t j = 0; j < n_tiles_width_active/2; j++) {
