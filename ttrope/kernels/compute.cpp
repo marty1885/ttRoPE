@@ -86,6 +86,13 @@ inline vFloat vector_sin_phase(vFloat x)
     return v;
 }
 
+// Each vInt is really treated as if it's a 8x4(width=8, height=4) block in SFPU and interacting with Dst
+// This function takes in a pointer `ptr` and load each integer into one of the rows of a vInt
+// int*      vInt
+// a         aaaaaaaa
+// b         bbbbbbbb
+// c    ->   cccccccc
+// d         dddddddd
 inline vInt load_into_row(int* ptr)
 {
     vInt row_mask = vConstTileId & (~15);
