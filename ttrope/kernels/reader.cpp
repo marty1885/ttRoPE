@@ -18,12 +18,16 @@ void kernel_main() {
     const uint32_t idx_page_size_bytes = get_tile_size(cb_in1);
     const auto idx = TensorAccessor(idx_args, idx_addr, n_tiles_height*32*sizeof(int32_t));
 
-    cb_reserve_back(cb_in1, 1);
-    uint32_t cb_idx_addr = get_write_ptr(cb_in1);
-    noc_async_read_page(0, idx, cb_idx_addr);
-    cb_push_back(cb_in1, 1);
-
     for(uint32_t h = 0; h < n_tiles_height; h++) {
+
+        cb_reserve_back(cb_in1, 1);
+        uint32_t cb_idx_addr = get_write_ptr(cb_in1);
+        // noc_async_read_page(0, idx, cb_idx_addr);
+        uint64_t read_addr = idx.get_noc_addr(0, 32*sizeof(int)*h);
+        noc_async_read(read_addr, cb_idx_addr, 32*sizeof(int));
+        noc_async_read_barrier();
+        cb_push_back(cb_in1, 1);
+
         for(uint32_t w = 0; w < n_tiles_width_active/2; w++) {
             cb_reserve_back(cb_in0, 2);
             uint32_t cb_src_addr = get_write_ptr(cb_in0);

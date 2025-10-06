@@ -204,19 +204,20 @@ void MAIN {
     float inv_d = 1.f/(n_tiles_width_active * (32 / 2));
     MATH(rope_tile_init(inv_d));
 
-    cb_wait_front(cb_in1, 1);
-    int* idxs = nullptr;
-    cb_get_tile(cb_in1, 0, &idxs);
-    idxs += 4; // Need to shift because read ptr is off by 1 << 4 bytes in BBE
-
     for(uint32_t i = 0; i < n_tiles_height; i++) {
+
+        cb_wait_front(cb_in1, 1);
+        int* idxs = nullptr;
+        cb_get_tile(cb_in1, 0, &idxs);
+        idxs += 4; // Need to shift because read ptr is off by 1 << 4 bytes in BBE
+
         for(uint32_t j = 0; j < n_tiles_width_active/2; j++) {
             cb_wait_front(cb_in0, 2);
             tile_regs_acquire();
             copy_tile_init(cb_in0);
             copy_tile(cb_in0, 0, 0);
             copy_tile(cb_in0, 1, 1);
-            MATH(rope_tile(idxs+32*i, inv_d, j*32));
+            MATH(rope_tile(idxs, inv_d, j*32));
             tile_regs_commit();
             tile_regs_wait();
 
@@ -228,9 +229,9 @@ void MAIN {
             cb_push_back(cb_out0, 2);
             cb_pop_front(cb_in0, 2);
         }
-    }
 
-    cb_pop_front(cb_in1, 1);
+        cb_pop_front(cb_in1, 1);
+    }
 
 }
 }

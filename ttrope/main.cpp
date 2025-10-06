@@ -160,7 +160,7 @@ int main()
     distributed::EnqueueWriteMeshBuffer(cq, idxs, idx_vec, false);
 
     MakeCircularBufferFP32(program, core, tt::CBIndex::c_0, 4);
-    MakeCircularBuffer(program, core, tt::CBIndex::c_1, N*sizeof(int32_t), N*sizeof(int32_t), tt::DataFormat::Int32);
+    MakeCircularBuffer(program, core, tt::CBIndex::c_1, N*sizeof(int32_t), 32*sizeof(int32_t), tt::DataFormat::Int32);
     MakeCircularBufferFP32(program, core, tt::CBIndex::c_16, 4);
     MakeCircularBufferFP32(program, core, tt::CBIndex::c_17, 4);
 
