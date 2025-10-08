@@ -52,11 +52,11 @@ CBHandle MakeCircularBufferBFP16(Program& program, const CoreSpec& core, tt::CBI
     return MakeCircularBuffer(program, core, cb, n_tiles * tile_size, tile_size, tt::DataFormat::Float16_b);
 }
 
-std::vector<float> cpu_rope(const std::vector<float>& vec, const std::vector<int> pos, size_t D, size_t D_active, size_t N)
+std::vector<float> cpu_rope(const std::vector<float>& vec, const std::vector<int> pos, size_t D, size_t D_active, size_t N, size_t B)
 {
     assert(D % 2 == 0 && "Dimension must be even");
     std::vector<float> result(vec.size());
-    for(size_t n = 0; n < N; ++n) {
+    for(size_t n = 0; n < N*B; ++n) {
         size_t offset = n * D;
         for (size_t i = 0; i < D_active/2; i ++) {
             float exponent = 2.0f * i / D_active;
@@ -124,6 +124,7 @@ int main()
 
     auto& cq = device->mesh_command_queue();
 
+    constexpr size_t B = 4;
     constexpr size_t D = 2048;
     constexpr size_t D_active = 256;
     constexpr size_t N = 32;
@@ -135,11 +136,12 @@ int main()
     static_assert(D_activet % 2 == 0 && D_activet > 0);
     static_assert(Dt > 0);
     static_assert(Nt > 0);
-    auto src = MakeBuffer<float>(device, Dt * Nt);
-    auto idxs = MakeBuffer(device, N*sizeof(int32_t), N*sizeof(int32_t), false); // Row major
-    auto dst = MakeBuffer<float>(device, Dt * Nt);
+    static_assert(B > 0);
+    auto src = MakeBuffer<float>(device, B * Dt * Nt);
+    auto idxs = MakeBuffer(device, B*N*sizeof(int32_t), N*sizeof(int32_t), false); // Row major
+    auto dst = MakeBuffer<float>(device, B * Dt * Nt);
 
-    std::vector<float> src_vec(N * D);
+    std::vector<float> src_vec(N * D * B);
     std::mt19937 rng(std::random_device{}());
     std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
     for(auto& v : src_vec) {
@@ -149,10 +151,10 @@ int main()
     std::vector<float> tilized_src = convert_layout(tt::stl::Span<const float>(src_vec), {N, D}, TensorLayoutType::LIN_ROW_MAJOR, TensorLayoutType::TILED_NFACES);
     distributed::EnqueueWriteMeshBuffer(cq, src, tilized_src, false);
 
-    std::vector<float> wiper(N * D, -2);
+    std::vector<float> wiper(N * D * B, -2);
     distributed::EnqueueWriteMeshBuffer(cq, dst, wiper, false);
 
-    std::vector<int32_t> idx_vec(N);
+    std::vector<int32_t> idx_vec(N * B);
     std::uniform_int_distribution<int> idist(0, 4096);
     for(size_t i = 0; i < N; ++i) {
         idx_vec[i] = idist(rng);
@@ -185,9 +187,9 @@ int main()
         .fp32_dest_acc_en = true,
     });
 
-    SetRuntimeArgs(program, reader, core, std::vector<uint32_t>{(uint32_t)src->address(), D_activet, Dt, Nt, (uint32_t)idxs->address()});
-    SetRuntimeArgs(program, compute, core, std::vector<uint32_t>{D_activet, Dt, Nt});
-    SetRuntimeArgs(program, writer, core, std::vector<uint32_t>{(uint32_t)dst->address(), D_activet, Dt, Nt});
+    SetRuntimeArgs(program, reader, core, std::vector<uint32_t>{(uint32_t)src->address(), D_activet, Dt, Nt, (uint32_t)idxs->address(), B});
+    SetRuntimeArgs(program, compute, core, std::vector<uint32_t>{D_activet, Dt, Nt, B});
+    SetRuntimeArgs(program, writer, core, std::vector<uint32_t>{(uint32_t)dst->address(), D_activet, Dt, Nt, B});
 
     distributed::MeshWorkload workload;
     distributed::MeshCoordinateRange device_range = distributed::MeshCoordinateRange(device->shape());
@@ -199,7 +201,7 @@ int main()
     distributed::EnqueueReadMeshBuffer(cq, result_vec_tiled, dst, true);
     std::vector<float> result_vec = convert_layout(tt::stl::Span<const float>(result_vec_tiled), {N, D}, TensorLayoutType::TILED_NFACES, TensorLayoutType::LIN_ROW_MAJOR);
 
-    auto reference = cpu_rope(src_vec, idx_vec, D, D_active, N);
+    auto reference = cpu_rope(src_vec, idx_vec, D, D_active, N, B);
     if(reference.size() != result_vec.size()) {
         std::cerr << "Error: Result size mismatch" << std::endl;
         return 0;

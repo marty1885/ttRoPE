@@ -220,6 +220,7 @@ void MAIN {
     uint32_t n_tiles_width_active = get_arg_val<uint32_t>(0);
     uint32_t n_tiles_width = get_arg_val<uint32_t>(1);
     uint32_t n_tiles_height = get_arg_val<uint32_t>(2);
+    uint32_t batch_size = get_arg_val<uint32_t>(3);
 
     constexpr uint32_t cb_in0 = tt::CBIndex::c_0;
     constexpr uint32_t cb_in1 = tt::CBIndex::c_1;
@@ -229,36 +230,38 @@ void MAIN {
     float inv_d = 1.f/(n_tiles_width_active * (32 / 2));
     MATH(rope_tile_init(inv_d));
 
-    for(uint32_t i = 0; i < n_tiles_height; i++) {
+    for(uint32_t b = 0; b < batch_size; b++) {
+        for(uint32_t i = 0; i < n_tiles_height; i++) {
 
-        cb_wait_front(cb_in1, 1);
-        int* idxs = nullptr;
-        cb_get_tile(cb_in1, 0, &idxs);
-        idxs += 4; // Need to shift because read ptr is off by 1 << 4 bytes in BBE
+            cb_wait_front(cb_in1, 1);
+            int* idxs = nullptr;
+            cb_get_tile(cb_in1, 0, &idxs);
+            idxs += 4; // Need to shift because read ptr is off by 1 << 4 bytes in BBE
 
-        for(uint32_t j = 0; j < n_tiles_width_active/2; j++) {
-            cb_wait_front(cb_in0, 2);
-            tile_regs_acquire();
-            if(j<2) {
-                MATH(rope_tile_precompute_pos(idxs));
+            for(uint32_t j = 0; j < n_tiles_width_active/2; j++) {
+                cb_wait_front(cb_in0, 2);
+                tile_regs_acquire();
+                if(j<2) {
+                    MATH(rope_tile_precompute_pos(idxs));
+                }
+                copy_tile_init(cb_in0);
+                copy_tile(cb_in0, 0, 0);
+                copy_tile(cb_in0, 1, 1);
+                MATH(rope_tile(idxs, inv_d, j*32));
+                tile_regs_commit();
+                tile_regs_wait();
+
+                cb_reserve_back(cb_out0, 2);
+                pack_reconfig_data_format(cb_out0);
+                pack_tile(0, cb_out0, 0);
+                pack_tile(1, cb_out0, 1);
+                tile_regs_release();
+                cb_push_back(cb_out0, 2);
+                cb_pop_front(cb_in0, 2);
             }
-            copy_tile_init(cb_in0);
-            copy_tile(cb_in0, 0, 0);
-            copy_tile(cb_in0, 1, 1);
-            MATH(rope_tile(idxs, inv_d, j*32));
-            tile_regs_commit();
-            tile_regs_wait();
 
-            cb_reserve_back(cb_out0, 2);
-            pack_reconfig_data_format(cb_out0);
-            pack_tile(0, cb_out0, 0);
-            pack_tile(1, cb_out0, 1);
-            tile_regs_release();
-            cb_push_back(cb_out0, 2);
-            cb_pop_front(cb_in0, 2);
+            cb_pop_front(cb_in1, 1);
         }
-
-        cb_pop_front(cb_in1, 1);
     }
 
 }
