@@ -110,7 +110,7 @@ inline vInt load_into_row(int* ptr)
     return v;
 }
 
-inline void rope_face(int* pos, float inv_d, int vec_offset)
+inline void rope_face(int* pos, float inv_d, int vec_offset, int face_idx)
 {
     DeviceZoneScopedN("ROPE-FACE");
     // RoPE - we need to calculate the final rotation sin(angle) and cos(angle)
@@ -137,14 +137,13 @@ inline void rope_face(int* pos, float inv_d, int vec_offset)
     //      vConstFloatPrg2. Reused across the kernel.
     // TODO: DIM_SIZE should be treated as a constant and this 1.f/DIM_SIZE can be
     //      evaulated at compile time.
+    int face_row = face_idx / 2;
+    int face_col = face_idx % 2;
+    int dst_offset = face_idx*8;
     for (int h = 0; h < 2; h++) {
-        vFloat block_lane_id = int32_to_float((vConstTileId & 15) + (vec_offset + h)); // No mod operator on SFPI, use bit hack
-        vFloat exponent = block_lane_id * vConstFloatPrgm2;
-
-        vFloat term_to_exp = -exponent * vConstFloatPrgm0 - vConstFloatPrgm1;
-        vFloat freq = vector_exp(term_to_exp);
+        vFloat freq = dst_reg[64+8+face_col*2+h];
         for (int i = 0; i < 4; i++) {
-            vFloat vpos = int32_to_float(load_into_row(pos+i*4));
+            vFloat vpos = dst_reg[64+face_row*4+i];
 
             // Standard RoPE math
             vFloat angle_phase = vpos * freq;
@@ -152,10 +151,10 @@ inline void rope_face(int* pos, float inv_d, int vec_offset)
             vFloat cos_value = vector_sin_phase(0.5f - angle_phase);
 
             size_t idx = i*2+h;
-            vFloat x = dst_reg[idx];
-            vFloat y = dst_reg[idx+32];
-            dst_reg[idx] = x * cos_value - y * sin_value;
-            dst_reg[idx+32] = x * sin_value + y * cos_value;
+            vFloat x = dst_reg[dst_offset+idx];
+            vFloat y = dst_reg[dst_offset+idx+32];
+            dst_reg[dst_offset+idx] = x * cos_value - y * sin_value;
+            dst_reg[dst_offset+idx+32] = x * sin_value + y * cos_value;
         }
     }
 }
@@ -175,12 +174,38 @@ inline void rope_tile(int* pos, float inv_d, int vec_offset)
     math::set_addr_mod_base();
     TTI_STALLWAIT(p_stall::STALL_SFPU, p_stall::MATH);
 
+    for(int i=0;i<4;i++) {
+        int internal_offset = ((i / 2 == 0) ? 0 : 16);
+        int pos_in_vector = vec_offset + internal_offset;
+        vFloat block_lane_id = int32_to_float((vConstTileId & 15) + (pos_in_vector + i % 2)); // No mod operator on SFPI, use bit hack
+        vFloat exponent = block_lane_id * vConstFloatPrgm2;
+
+        vFloat term_to_exp = -exponent * vConstFloatPrgm0 - vConstFloatPrgm1;
+        vFloat freq = vector_exp(term_to_exp);
+        dst_reg[64+8+i] = freq;
+    }
+
     for (int face = 0; face < 4; face++) {
         int internal_offset = ((face % 2 == 0) ? 0 : 16);
         int idx_offset = face > 1 ? 16 : 0;
-        rope_face(pos + idx_offset, inv_d, vec_offset + internal_offset);
-        TTI_SETRWC(p_setrwc::CLR_NONE, p_setrwc::CR_D, 8, 0, 0, p_setrwc::SET_D);
-        TTI_SETRWC(p_setrwc::CLR_NONE, p_setrwc::CR_D, 8, 0, 0, p_setrwc::SET_D);
+        rope_face(pos + idx_offset, inv_d, vec_offset + internal_offset, face);
+    }
+
+    math::clear_dst_reg_addr();
+    TTI_STALLWAIT(p_stall::STALL_CFG, p_stall::WAIT_SFPU);
+    math::clear_addr_mod_base();
+}
+
+inline void rope_tile_precompute_pos(int* pos)
+{
+    DeviceZoneScopedN("ROPE-TILE-PRECOMP-POS");
+    math::set_dst_write_addr<DstTileLayout::Default, DstTileShape::Tile32x32>(0);
+    math::set_addr_mod_base();
+    TTI_STALLWAIT(p_stall::STALL_SFPU, p_stall::MATH);
+
+    for (int i=0;i<8;i++) {
+        vFloat vpos = int32_to_float(load_into_row(pos+i*4));
+        dst_reg[64+i] = vpos;
     }
 
     math::clear_dst_reg_addr();
@@ -214,6 +239,9 @@ void MAIN {
         for(uint32_t j = 0; j < n_tiles_width_active/2; j++) {
             cb_wait_front(cb_in0, 2);
             tile_regs_acquire();
+            if(j<2) {
+                MATH(rope_tile_precompute_pos(idxs));
+            }
             copy_tile_init(cb_in0);
             copy_tile(cb_in0, 0, 0);
             copy_tile(cb_in0, 1, 1);
