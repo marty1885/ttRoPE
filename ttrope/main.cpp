@@ -13,6 +13,7 @@
 #include <tt-metalium/tt_backend_api_types.hpp>
 #include <tt-metalium/tt_metal_profiler.hpp>
 #include <tt-metalium/distributed.hpp>
+#include <tt-metalium/work_split.hpp>
 
 using namespace tt::tt_metal;
 
@@ -118,6 +119,7 @@ inline float check_vector_pcc(const std::vector<float>& vec_a, const std::vector
 int main()
 {
     auto device = distributed::MeshDevice::create_unit_mesh(0);
+    auto core_grid = device->compute_with_storage_grid_size();
 
     Program program = CreateProgram();
     constexpr CoreCoord core = {0, 0};
@@ -161,15 +163,36 @@ int main()
     }
     distributed::EnqueueWriteMeshBuffer(cq, idxs, idx_vec, false);
 
-    MakeCircularBufferFP32(program, core, tt::CBIndex::c_0, 4);
-    MakeCircularBuffer(program, core, tt::CBIndex::c_1, N*sizeof(int32_t), 32*sizeof(int32_t), tt::DataFormat::Int32);
-    MakeCircularBufferFP32(program, core, tt::CBIndex::c_16, 4);
-    MakeCircularBufferFP32(program, core, tt::CBIndex::c_17, 4);
+    uint32_t active_tiles = D_activet/2 * Nt * B;
+    uint32_t passive_tiles = (Dt - D_activet) * Nt * B;
+    auto [num_cores_active,
+        all_cores_active,
+        core_group_1_active,
+        core_group_2_active,
+        work_per_core1_active,
+        work_per_core2_active] =
+        tt::tt_metal::split_work_to_cores(core_grid, active_tiles);
+    auto [num_cores_passive,
+        all_cores_passive,
+        core_group_1_passive,
+        core_group_2_passive,
+        work_per_core1_passive,
+        work_per_core2_passive] =
+        tt::tt_metal::split_work_to_cores(core_grid, passive_tiles);
+
+    // Combine the two groups of cores
+    auto all_cores = all_cores_active.merge(all_cores_passive);
+
+    MakeCircularBufferFP32(program, all_cores, tt::CBIndex::c_0, 4);
+    MakeCircularBuffer(program, all_cores, tt::CBIndex::c_1, N*sizeof(int32_t), 32*sizeof(int32_t), tt::DataFormat::Int32);
+    MakeCircularBufferFP32(program, all_cores, tt::CBIndex::c_16, 4);
+    MakeCircularBufferFP32(program, all_cores, tt::CBIndex::c_17, 4);
+
 
     std::vector<uint32_t> reader_compile_time_args;
     TensorAccessorArgs(*src).append_to(reader_compile_time_args);
     TensorAccessorArgs(*idxs).append_to(reader_compile_time_args);
-    KernelHandle reader = CreateKernel(program, "../ttrope/kernels/reader.cpp", core, DataMovementConfig{
+    KernelHandle reader = CreateKernel(program, "../ttrope/kernels/reader.cpp", all_cores, DataMovementConfig{
         .processor = DataMovementProcessor::RISCV_0,
         .noc = NOC::RISCV_0_default,
         .compile_args = reader_compile_time_args
@@ -177,19 +200,47 @@ int main()
 
     std::vector<uint32_t> writer_compile_time_args;
     TensorAccessorArgs(*dst).append_to(writer_compile_time_args);
-    KernelHandle writer = CreateKernel(program, "../ttrope/kernels/writer.cpp", core, DataMovementConfig{
+    KernelHandle writer = CreateKernel(program, "../ttrope/kernels/writer.cpp", all_cores, DataMovementConfig{
         .processor = DataMovementProcessor::RISCV_1,
         .noc = NOC::RISCV_1_default,
         .compile_args = writer_compile_time_args
     });
 
-    KernelHandle compute = CreateKernel(program, "../ttrope/kernels/compute.cpp", core, ComputeConfig{
+    KernelHandle compute = CreateKernel(program, "../ttrope/kernels/compute.cpp", all_cores, ComputeConfig{
         .fp32_dest_acc_en = true,
     });
 
-    SetRuntimeArgs(program, reader, core, std::vector<uint32_t>{(uint32_t)src->address(), D_activet, Dt, Nt, (uint32_t)idxs->address(), B, 0, B*Nt*(D_activet/2), 0, B*Nt*(Dt - D_activet)});
-    SetRuntimeArgs(program, compute, core, std::vector<uint32_t>{D_activet, Dt, Nt, B, 0, B*Nt*(D_activet/2)});
-    SetRuntimeArgs(program, writer, core, std::vector<uint32_t>{(uint32_t)dst->address(), D_activet, Dt, Nt, B, 0, B*Nt*(D_activet/2), 0, B*Nt*(Dt - D_activet)});
+    uint32_t active_id = 0;
+    uint32_t passive_id = 0;
+    for(const auto& range : all_cores.ranges()) {
+        for(const auto& core : range) {
+            uint32_t active_size = 0;
+            uint32_t passive_size = 0;
+
+            if(core_group_1_active.contains(core)) {
+                active_size = work_per_core1_active;
+            }
+            else if(core_group_2_active.contains(core)) {
+                passive_size = work_per_core2_passive;
+            }
+
+            if(core_group_1_passive.contains(core)) {
+                passive_size = work_per_core1_passive;
+            }
+            else if(core_group_2_passive.contains(core)) {
+                passive_size = work_per_core2_passive;
+            }
+
+            SetRuntimeArgs(program, reader, core, std::vector<uint32_t>{(uint32_t)src->address(), D_activet, Dt, Nt, (uint32_t)idxs->address(), B, active_id, active_id+active_size, passive_id, passive_id+passive_size});
+            SetRuntimeArgs(program, compute, core, std::vector<uint32_t>{D_activet, Dt, Nt, B, active_id, active_id+active_size});
+            SetRuntimeArgs(program, writer, core, std::vector<uint32_t>{(uint32_t)dst->address(), D_activet, Dt, Nt, B, active_id, active_id+active_size, passive_id, passive_id+passive_size});
+
+            fmt::println("core {}: active [{}, {}] | passive [{}, {}]", core, active_id, active_id+active_size, passive_id, passive_id+passive_size);
+
+            active_id += active_size;
+            passive_id += passive_size;
+        }
+    }
 
     distributed::MeshWorkload workload;
     distributed::MeshCoordinateRange device_range = distributed::MeshCoordinateRange(device->shape());

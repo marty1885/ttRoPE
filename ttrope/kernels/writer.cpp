@@ -33,7 +33,7 @@ void kernel_main() {
 
         cb_wait_front(cb_out0, 2);
         uint32_t tile_idx = b * batch_tiles_wh + h * n_tiles_width + w;
-        uint32_t tile_idx2 =b * batch_tiles_wh+  h * n_tiles_width + (w + n_tiles_width_active/2);
+        uint32_t tile_idx2 = b * batch_tiles_wh+  h * n_tiles_width + (w + n_tiles_width_active/2);
         uint32_t cb_out_addr = get_read_ptr(cb_out0);
         noc_async_write_tile(tile_idx, dst, cb_out_addr);
         noc_async_write_tile(tile_idx2, dst, cb_out_addr + tile_size_bytes);
