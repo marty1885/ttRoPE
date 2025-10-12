@@ -232,23 +232,18 @@ void MAIN {
     float inv_d = 1.f/(n_tiles_width_active * (32 / 2));
     MATH(rope_tile_init(inv_d));
 
-    uint32_t batch_tiles_wh = n_tiles_width * n_tiles_height;
-    uint32_t batch_active_tiles_wh = (n_tiles_width_active/2) * n_tiles_height;
-
-    uint32_t last_b = (uint32_t)-1;
     uint32_t last_h = (uint32_t)-1;
     bool need_pop = false;
     int cached_populated = 0;
     int* idxs = nullptr;
 
     for(uint32_t active_id=active_begin; active_id<active_end; active_id++) {
-        uint32_t b = active_id / batch_active_tiles_wh;
-        uint32_t h = (active_id % batch_active_tiles_wh) / (n_tiles_width_active/2);
+        uint32_t h = active_id / (n_tiles_width_active/2);
         uint32_t w = active_id % (n_tiles_width_active/2);
         cb_wait_front(cb_in0, 2);
         tile_regs_acquire();
 
-        if(last_b != b || last_h != h) {
+        if(last_h != h) {
             if(need_pop) {
                 cb_pop_front(cb_in1, 1);
             }
@@ -256,7 +251,6 @@ void MAIN {
             need_pop = true;
             cb_get_tile(cb_in1, 0, &idxs);
             idxs += 4; // Need to shift because read ptr is off by 1 << 4 bytes in BBE
-            last_b = b;
             last_h = h;
             cached_populated = 0;
         }

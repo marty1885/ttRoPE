@@ -27,8 +27,6 @@ void kernel_main() {
     uint32_t batch_active_tiles_wh = (n_tiles_width_active/2) * n_tiles_height;
     uint32_t last_b = (uint32_t)-1;
     uint32_t last_h = (uint32_t)-1;
-    uint32_t n_tiles_width_passive = n_tiles_width - n_tiles_width_active;
-    uint32_t batch_passive_tiles_wh = n_tiles_width_passive * n_tiles_height;
     for(uint32_t active_id=active_begin; active_id<active_end; active_id++) {
         uint32_t b = active_id / batch_active_tiles_wh;
         uint32_t h = (active_id % batch_active_tiles_wh) / (n_tiles_width_active/2);
@@ -55,11 +53,11 @@ void kernel_main() {
         cb_push_back(cb_in0, 2);
     }
 
+    uint32_t n_tiles_width_passive = n_tiles_width - n_tiles_width_active;
     for(uint32_t passive_id = passive_begin; passive_id < passive_end; passive_id++) {
-        uint32_t b = passive_id / batch_passive_tiles_wh;
-        uint32_t h = (passive_id % batch_passive_tiles_wh) / n_tiles_width_passive;
-        uint32_t w = (passive_id % batch_passive_tiles_wh) % n_tiles_width_passive + n_tiles_width_active;
-        uint32_t tile_idx = b * batch_tiles_wh + h * n_tiles_width + w;
+        uint32_t h = passive_id / n_tiles_width_passive;
+        uint32_t w = passive_id % n_tiles_width_passive + n_tiles_width_active;
+        uint32_t tile_idx = h * n_tiles_width + w;
         cb_reserve_back(cb_bypass, 1);
         uint32_t cb_bypass_addr = get_write_ptr(cb_bypass);
         noc_async_read_tile(tile_idx, src, cb_bypass_addr);

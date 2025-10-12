@@ -129,7 +129,7 @@ int main()
     constexpr size_t B = 4;
     constexpr size_t D = 2048;
     constexpr size_t D_active = 256;
-    constexpr size_t N = 128;
+    constexpr size_t N = 1024;
     static_assert(D % 32 == 0 && N % 32 == 0);
     static_assert(D >= D_active);
     constexpr uint32_t Dt = D/32;
