@@ -221,6 +221,8 @@ void MAIN {
     uint32_t n_tiles_width = get_arg_val<uint32_t>(1);
     uint32_t n_tiles_height = get_arg_val<uint32_t>(2);
     uint32_t batch_size = get_arg_val<uint32_t>(3);
+    uint32_t active_begin = get_arg_val<uint32_t>(4);
+    uint32_t active_end = get_arg_val<uint32_t>(5);
 
     constexpr uint32_t cb_in0 = tt::CBIndex::c_0;
     constexpr uint32_t cb_in1 = tt::CBIndex::c_1;
@@ -230,38 +232,57 @@ void MAIN {
     float inv_d = 1.f/(n_tiles_width_active * (32 / 2));
     MATH(rope_tile_init(inv_d));
 
-    for(uint32_t b = 0; b < batch_size; b++) {
-        for(uint32_t i = 0; i < n_tiles_height; i++) {
+    uint32_t batch_tiles_wh = n_tiles_width * n_tiles_height;
+    uint32_t batch_active_tiles_wh = (n_tiles_width_active/2) * n_tiles_height;
 
+    uint32_t last_b = (uint32_t)-1;
+    uint32_t last_h = (uint32_t)-1;
+    bool need_pop = false;
+    int cached_populated = 0;
+    int* idxs = nullptr;
+
+    for(uint32_t active_id=active_begin; active_id<active_end; active_id++) {
+        uint32_t b = active_id / batch_active_tiles_wh;
+        uint32_t h = (active_id % batch_active_tiles_wh) / (n_tiles_width_active/2);
+        uint32_t w = active_id % (n_tiles_width_active/2);
+        cb_wait_front(cb_in0, 2);
+        tile_regs_acquire();
+
+        if(last_b != b || last_h != h) {
+            if(need_pop) {
+                cb_pop_front(cb_in1, 1);
+            }
             cb_wait_front(cb_in1, 1);
-            int* idxs = nullptr;
+            need_pop = true;
             cb_get_tile(cb_in1, 0, &idxs);
             idxs += 4; // Need to shift because read ptr is off by 1 << 4 bytes in BBE
-
-            for(uint32_t j = 0; j < n_tiles_width_active/2; j++) {
-                cb_wait_front(cb_in0, 2);
-                tile_regs_acquire();
-                if(j<2) {
-                    MATH(rope_tile_precompute_pos(idxs));
-                }
-                copy_tile_init(cb_in0);
-                copy_tile(cb_in0, 0, 0);
-                copy_tile(cb_in0, 1, 1);
-                MATH(rope_tile(idxs, inv_d, j*32));
-                tile_regs_commit();
-                tile_regs_wait();
-
-                cb_reserve_back(cb_out0, 2);
-                pack_reconfig_data_format(cb_out0);
-                pack_tile(0, cb_out0, 0);
-                pack_tile(1, cb_out0, 1);
-                tile_regs_release();
-                cb_push_back(cb_out0, 2);
-                cb_pop_front(cb_in0, 2);
-            }
-
-            cb_pop_front(cb_in1, 1);
+            last_b = b;
+            last_h = h;
+            cached_populated = 0;
         }
+
+        if(cached_populated<2) {
+            MATH(rope_tile_precompute_pos(idxs));
+            cached_populated++;
+        }
+        copy_tile_init(cb_in0);
+        copy_tile(cb_in0, 0, 0);
+        copy_tile(cb_in0, 1, 1);
+        MATH(rope_tile(idxs, inv_d, w*32));
+        tile_regs_commit();
+        tile_regs_wait();
+
+        cb_reserve_back(cb_out0, 2);
+        pack_reconfig_data_format(cb_out0);
+        pack_tile(0, cb_out0, 0);
+        pack_tile(1, cb_out0, 1);
+        tile_regs_release();
+        cb_push_back(cb_out0, 2);
+        cb_pop_front(cb_in0, 2);
+    }
+
+    if(need_pop) {
+        cb_pop_front(cb_in1, 1);
     }
 
 }
