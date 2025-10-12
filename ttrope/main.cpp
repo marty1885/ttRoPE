@@ -126,10 +126,10 @@ int main()
 
     auto& cq = device->mesh_command_queue();
 
-    constexpr size_t B = 2;
+    constexpr size_t B = 4;
     constexpr size_t D = 2048;
     constexpr size_t D_active = 256;
-    constexpr size_t N = 64;
+    constexpr size_t N = 128;
     static_assert(D % 32 == 0 && N % 32 == 0);
     static_assert(D >= D_active);
     constexpr uint32_t Dt = D/32;
@@ -221,7 +221,7 @@ int main()
                 active_size = work_per_core1_active;
             }
             else if(core_group_2_active.contains(core)) {
-                passive_size = work_per_core2_passive;
+                active_size = work_per_core2_active;
             }
 
             if(core_group_1_passive.contains(core)) {
