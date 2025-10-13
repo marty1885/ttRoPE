@@ -4,7 +4,7 @@
 #include "compute_kernel_api/eltwise_unary/exp.h"
 #include "compute_kernel_api/eltwise_unary/recip.h"
 #include "compute_kernel_api/eltwise_unary/trigonometry.h"
-#include <array>
+#include <string.h>
 
 #include <tools/profiler/kernel_profiler.hpp>
 
@@ -223,6 +223,7 @@ void MAIN {
     uint32_t batch_size = get_arg_val<uint32_t>(3);
     uint32_t active_begin = get_arg_val<uint32_t>(4);
     uint32_t active_end = get_arg_val<uint32_t>(5);
+    uint32_t height_elements = get_arg_val<uint32_t>(6);
 
     constexpr uint32_t cb_in0 = tt::CBIndex::c_0;
     constexpr uint32_t cb_in1 = tt::CBIndex::c_1;
@@ -235,7 +236,7 @@ void MAIN {
     uint32_t last_h = (uint32_t)-1;
     bool need_pop = false;
     int cached_populated = 0;
-    int* idxs = nullptr;
+    int idxs[32];
 
     for(uint32_t active_id=active_begin; active_id<active_end; active_id++) {
         uint32_t h = active_id / (n_tiles_width_active/2);
@@ -244,15 +245,21 @@ void MAIN {
         tile_regs_acquire();
 
         if(last_h != h) {
+            int* idxs_ptr = nullptr;
             if(need_pop) {
                 cb_pop_front(cb_in1, 1);
             }
             cb_wait_front(cb_in1, 1);
             need_pop = true;
-            cb_get_tile(cb_in1, 0, &idxs);
-            idxs += 4; // Need to shift because read ptr is off by 1 << 4 bytes in BBE
+            cb_get_tile(cb_in1, 0, &idxs_ptr);
+            idxs_ptr += 4; // Need to shift because read ptr is off by 1 << 4 bytes in BBE
             last_h = h;
             cached_populated = 0;
+
+            uint32_t real_height = h%n_tiles_height;
+            uint32_t valid_data_size = std::min(height_elements - real_height*32, uint32_t{32});
+            memcpy(idxs, idxs_ptr, valid_data_size * sizeof(int));
+            memset(idxs + valid_data_size, 0, (32 - valid_data_size) * sizeof(int));
         }
 
         if(cached_populated<2) {

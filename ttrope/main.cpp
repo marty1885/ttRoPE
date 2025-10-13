@@ -123,13 +123,14 @@ int main()
 
     Program program = CreateProgram();
     constexpr CoreCoord core = {0, 0};
+    core_grid = CoreCoord(1, 1);
 
     auto& cq = device->mesh_command_queue();
 
-    constexpr size_t B = 4;
+    constexpr size_t B = 1;
     constexpr size_t D = 2048;
     constexpr size_t D_active = 256;
-    constexpr size_t N = 1024;
+    constexpr size_t N = 32;
     static_assert(D % 32 == 0 && N % 32 == 0);
     static_assert(D >= D_active);
     constexpr uint32_t Dt = D/32;
@@ -184,7 +185,7 @@ int main()
     auto all_cores = all_cores_active.merge(all_cores_passive);
 
     MakeCircularBufferFP32(program, all_cores, tt::CBIndex::c_0, 4);
-    MakeCircularBuffer(program, all_cores, tt::CBIndex::c_1, N*sizeof(int32_t), 32*sizeof(int32_t), tt::DataFormat::Int32);
+    MakeCircularBuffer(program, all_cores, tt::CBIndex::c_1, 2*32*sizeof(int32_t), 32*sizeof(int32_t), tt::DataFormat::Int32);
     MakeCircularBufferFP32(program, all_cores, tt::CBIndex::c_16, 4);
     MakeCircularBufferFP32(program, all_cores, tt::CBIndex::c_17, 4);
 
@@ -231,8 +232,8 @@ int main()
                 passive_size = work_per_core2_passive;
             }
 
-            SetRuntimeArgs(program, reader, core, std::vector<uint32_t>{(uint32_t)src->address(), D_activet, Dt, Nt, (uint32_t)idxs->address(), B, active_id, active_id+active_size, passive_id, passive_id+passive_size});
-            SetRuntimeArgs(program, compute, core, std::vector<uint32_t>{D_activet, Dt, Nt, B, active_id, active_id+active_size});
+            SetRuntimeArgs(program, reader, core, std::vector<uint32_t>{(uint32_t)src->address(), D_activet, Dt, Nt, (uint32_t)idxs->address(), B, active_id, active_id+active_size, passive_id, passive_id+passive_size, N});
+            SetRuntimeArgs(program, compute, core, std::vector<uint32_t>{D_activet, Dt, Nt, B, active_id, active_id+active_size, N});
             SetRuntimeArgs(program, writer, core, std::vector<uint32_t>{(uint32_t)dst->address(), D_activet, Dt, Nt, B, active_id, active_id+active_size, passive_id, passive_id+passive_size});
 
             fmt::println("core {}: active [{}, {}] | passive [{}, {}]", core, active_id, active_id+active_size, passive_id, passive_id+passive_size);

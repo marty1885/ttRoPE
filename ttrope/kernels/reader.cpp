@@ -11,6 +11,7 @@ void kernel_main() {
     uint32_t active_end = get_arg_val<uint32_t>(7);
     uint32_t passive_begin = get_arg_val<uint32_t>(8);
     uint32_t passive_end = get_arg_val<uint32_t>(9);
+    uint32_t height_elements = get_arg_val<uint32_t>(10);
 
     constexpr uint32_t cb_in0 = tt::CBIndex::c_0;
     constexpr uint32_t cb_in1 = tt::CBIndex::c_1;
@@ -33,8 +34,10 @@ void kernel_main() {
             uint32_t b = active_id / batch_active_tiles_wh;
             cb_reserve_back(cb_in1, 1);
             uint32_t cb_idx_addr = get_write_ptr(cb_in1);
-            uint64_t read_addr = idx.get_noc_addr(b, 32*sizeof(int)*(h%n_tiles_height));
-            noc_async_read(read_addr, cb_idx_addr, 32*sizeof(int));
+            uint32_t real_height = h%n_tiles_height;
+            uint64_t read_addr = idx.get_noc_addr(b, 32*sizeof(int)*real_height);
+            uint32_t read_size = std::min(height_elements - real_height*32, uint32_t{32});
+            noc_async_read(read_addr, cb_idx_addr, read_size*sizeof(int));
             noc_async_read_barrier();
             cb_push_back(cb_in1, 1);
             last_h = h;
