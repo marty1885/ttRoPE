@@ -37,6 +37,7 @@ target_include_directories(ttmetal INTERFACE
 
 target_link_directories(ttmetal INTERFACE
     $ENV{TT_METAL_HOME}/build/tt_metal
+    $ENV{TT_METAL_HOME}/build/tt_stl
 )
 
 target_link_libraries(ttmetal INTERFACE
@@ -45,9 +46,25 @@ target_link_libraries(ttmetal INTERFACE
     Boost::core
     Boost::container
     tt_metal
+    tt_stl
+)
+
+add_library(ttnn IMPORTED INTERFACE)
+target_include_directories(ttnn INTERFACE
+    $ENV{TT_METAL_HOME}/ttnn/cpp/
+    $ENV{TT_METAL_HOME}/ttnn/api/
+)
+target_link_libraries(ttnn INTERFACE
+    $ENV{TT_METAL_HOME}/build/ttnn/_ttnncpp.so
+    ttmetal
 )
 
 add_executable(cpu main.cpp)
+
 add_executable(ttrope ttrope/main.cpp)
 target_link_libraries(ttrope PRIVATE ttmetal)
 target_precompile_headers(ttrope PRIVATE ttrope/pch.hpp)
+
+add_executable(ttropeop ttropeop/main.cpp)
+target_link_libraries(ttropeop PRIVATE ttmetal ttnn)
+target_precompile_headers(ttropeop PRIVATE ttropeop/pch.hpp)

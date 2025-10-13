@@ -11,3 +11,4 @@
 #include <tt-metalium/tt_metal_profiler.hpp>
 #include <tt-metalium/distributed.hpp>
 #include <tt-metalium/work_split.hpp>
+#include <ttnn/decorators.hpp>
