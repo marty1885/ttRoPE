@@ -63,7 +63,7 @@ std::vector<float> cpu_rope(const std::vector<float>& vec, const std::vector<int
             float exponent = 2.0f * i / D_active;
             float freq = 1.0f / std::pow(10000.0f, exponent);
 
-            float angle = pos[n] * freq;
+            float angle = pos[n/N] * freq;
             float cos_angle = std::cos(angle);
             float sin_angle = std::sin(angle);
 
@@ -142,7 +142,7 @@ int main()
     static_assert(Nt > 0);
     static_assert(B > 0);
     auto src = MakeBuffer<float>(device, B * Dt * Nt);
-    auto idxs = MakeBuffer(device, B*N*sizeof(int32_t), N*sizeof(int32_t), false); // Row major
+    auto idxs = MakeBuffer(device, B*sizeof(int32_t), B*sizeof(int32_t), false); // Row major
     auto dst = MakeBuffer<float>(device, B * Dt * Nt);
 
     std::vector<float> src_vec(N * D * B);
@@ -158,9 +158,9 @@ int main()
     std::vector<float> wiper(N * D * B, -2);
     distributed::EnqueueWriteMeshBuffer(cq, dst, wiper, false);
 
-    std::vector<int32_t> idx_vec(N * B);
+    std::vector<int32_t> idx_vec(B);
     std::uniform_int_distribution<int> idist(0, 4096);
-    for(size_t i = 0; i < N; ++i) {
+    for(size_t i = 0; i < B; ++i) {
         idx_vec[i] = idist(rng);
     }
     distributed::EnqueueWriteMeshBuffer(cq, idxs, idx_vec, false);
@@ -186,7 +186,7 @@ int main()
     auto all_cores = all_cores_active.merge(all_cores_passive);
 
     MakeCircularBufferFP32(program, all_cores, tt::CBIndex::c_0, 4);
-    MakeCircularBuffer(program, all_cores, tt::CBIndex::c_1, 2*32*sizeof(int32_t), 32*sizeof(int32_t), tt::DataFormat::Int32);
+    MakeCircularBuffer(program, all_cores, tt::CBIndex::c_1, B*sizeof(int32_t), B*sizeof(int32_t), tt::DataFormat::Int32);
     MakeCircularBufferFP32(program, all_cores, tt::CBIndex::c_16, 4);
     MakeCircularBufferFP32(program, all_cores, tt::CBIndex::c_17, 4);
 

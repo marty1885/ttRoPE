@@ -21,27 +21,18 @@ void kernel_main() {
     const auto src = TensorAccessor(src_args, src_addr, tile_size_bytes);
 
     constexpr auto idx_args = TensorAccessorArgs<src_args.next_compile_time_args_offset()>();
-    const uint32_t idx_page_size_bytes = get_tile_size(cb_in1);
     const auto idx = TensorAccessor(idx_args, idx_addr, n_tiles_height*32*sizeof(int32_t));
 
-    uint32_t last_h = (uint32_t)-1;
+    cb_reserve_back(cb_in1, 1);
+    uint32_t cb_idx_addr = get_write_ptr(cb_in1);
+    uint64_t read_addr = idx.get_noc_addr(0, sizeof(int)*batch_size);
+    noc_async_read(read_addr, cb_idx_addr, batch_size*sizeof(int));
+    noc_async_read_barrier();
+    cb_push_back(cb_in1, 1);
+
     for(uint32_t active_id=active_begin; active_id<active_end; active_id++) {
         uint32_t h = active_id / (n_tiles_width_active/2);
         uint32_t w = active_id % (n_tiles_width_active/2);
-
-        if(last_h != h) {
-            uint32_t batch_active_tiles_wh = (n_tiles_width_active/2) * n_tiles_height;
-            uint32_t b = active_id / batch_active_tiles_wh;
-            cb_reserve_back(cb_in1, 1);
-            uint32_t cb_idx_addr = get_write_ptr(cb_in1);
-            uint32_t real_height = h%n_tiles_height;
-            uint64_t read_addr = idx.get_noc_addr(b, 32*sizeof(int)*real_height);
-            uint32_t read_size = std::min(height_elements - real_height*32, uint32_t{32});
-            noc_async_read(read_addr, cb_idx_addr, read_size*sizeof(int));
-            noc_async_read_barrier();
-            cb_push_back(cb_in1, 1);
-            last_h = h;
-        }
 
         cb_reserve_back(cb_in0, 2);
         uint32_t cb_src_addr = get_write_ptr(cb_in0);

@@ -119,9 +119,8 @@ void ttggml::RoPEDeviceOperation::validate_with_output_tensors(
     // expect index to have shape [batch, n_token]
     const auto& src_shape = src_tensor.logical_shape();
     const auto& index_shape = index_tensor.logical_shape();
-    TT_FATAL(src_shape[-2] == index_shape[-1]
-        && src_shape[-3] == index_shape[-2],
-        "Shape mismatch: src_shape = {}, index_shape = {}. Expect format [batch, n_token, vec_dim] and [batch, n_token]", src_shape, index_shape);
+    TT_FATAL(src_shape[-3] == index_shape[-1],
+        "Shape mismatch: src_shape = {}, index_shape = {}. Expect format [batch, n_token, vec_dim] and [batch]", src_shape, index_shape);
 
     TT_FATAL(index_tensor.dtype() == tt::tt_metal::DataType::INT32, "Index tensor must be of type INT32");
     TT_FATAL(src_tensor.layout() == tt::tt_metal::Layout::TILE,  "Source tensor must be of layout TILE");
@@ -186,7 +185,7 @@ tt::tt_metal::operation::ProgramWithCallbacks ttggml::RoPEDeviceOperation::creat
     auto all_cores = all_cores_active.merge(all_cores_passive);
 
     MakeCircularBufferFP32(program, all_cores, tt::CBIndex::c_0, 4);
-    MakeCircularBuffer(program, all_cores, tt::CBIndex::c_1, 2*32*sizeof(int32_t), 32*sizeof(int32_t), tt::DataFormat::Int32);
+    MakeCircularBuffer(program, all_cores, tt::CBIndex::c_1, B*sizeof(int32_t), B*sizeof(int32_t), tt::DataFormat::Int32);
     MakeCircularBufferFP32(program, all_cores, tt::CBIndex::c_16, 4);
     MakeCircularBufferFP32(program, all_cores, tt::CBIndex::c_17, 4);
 
@@ -282,7 +281,7 @@ int main()
 {
     auto device = ttnn::open_mesh_device(0);
     auto src = ttnn::ones(ttnn::Shape({1, 32, 2048}), DataType::FLOAT32, Layout::TILE, *device);
-    auto idx = ttnn::ones(ttnn::Shape({1, 32}), DataType::INT32, Layout::ROW_MAJOR, *device);
+    auto idx = ttnn::ones(ttnn::Shape({1}), DataType::INT32, Layout::ROW_MAJOR, *device);
     auto res = ttggml::rope(src, idx, 256);
     std::cout << res.write_to_string() << std::endl;
 

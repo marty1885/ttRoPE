@@ -110,7 +110,7 @@ inline vInt load_into_row(int* ptr)
     return v;
 }
 
-inline void rope_face(int* pos, float inv_d, int vec_offset, int face_idx)
+inline void rope_face(int pos, float inv_d, int vec_offset, int face_idx)
 {
     DeviceZoneScopedN("ROPE-FACE");
     // RoPE - we need to calculate the final rotation sin(angle) and cos(angle)
@@ -143,7 +143,7 @@ inline void rope_face(int* pos, float inv_d, int vec_offset, int face_idx)
     for (int h = 0; h < 2; h++) {
         vFloat freq = dst_reg[64+8+face_col*2+h];
         for (int i = 0; i < 4; i++) {
-            vFloat vpos = dst_reg[64+face_row*4+i];
+            vFloat vpos = int32_to_float(pos);
 
             // Standard RoPE math
             vFloat angle_phase = vpos * freq;
@@ -166,7 +166,7 @@ inline void rope_tile_init(float inv_d)
     vConstFloatPrgm2 = inv_d;
 }
 
-inline void rope_tile(int* pos, float inv_d, int vec_offset)
+inline void rope_tile(int pos, float inv_d, int vec_offset)
 {
     (void)inv_d; // Unused
     DeviceZoneScopedN("ROPE-TILE");
@@ -188,7 +188,7 @@ inline void rope_tile(int* pos, float inv_d, int vec_offset)
     for (int face = 0; face < 4; face++) {
         int internal_offset = ((face % 2 == 0) ? 0 : 16);
         int idx_offset = face > 1 ? 16 : 0;
-        rope_face(pos + idx_offset, inv_d, vec_offset + internal_offset, face);
+        rope_face(pos, inv_d, vec_offset + internal_offset, face);
     }
 
     math::clear_dst_reg_addr();
@@ -196,22 +196,22 @@ inline void rope_tile(int* pos, float inv_d, int vec_offset)
     math::clear_addr_mod_base();
 }
 
-inline void rope_tile_precompute_pos(int* pos)
-{
-    DeviceZoneScopedN("ROPE-TILE-PRECOMP-POS");
-    math::set_dst_write_addr<DstTileLayout::Default, DstTileShape::Tile32x32>(0);
-    math::set_addr_mod_base();
-    TTI_STALLWAIT(p_stall::STALL_SFPU, p_stall::MATH);
+// inline void rope_tile_precompute_pos(int* pos)
+// {
+//     DeviceZoneScopedN("ROPE-TILE-PRECOMP-POS");
+//     math::set_dst_write_addr<DstTileLayout::Default, DstTileShape::Tile32x32>(0);
+//     math::set_addr_mod_base();
+//     TTI_STALLWAIT(p_stall::STALL_SFPU, p_stall::MATH);
 
-    for (int i=0;i<8;i++) {
-        vFloat vpos = int32_to_float(load_into_row(pos+i*4));
-        dst_reg[64+i] = vpos;
-    }
+//     for (int i=0;i<8;i++) {
+//         vFloat vpos = int32_to_float(load_into_row(pos+i*4));
+//         dst_reg[64+i] = vpos;
+//     }
 
-    math::clear_dst_reg_addr();
-    TTI_STALLWAIT(p_stall::STALL_CFG, p_stall::WAIT_SFPU);
-    math::clear_addr_mod_base();
-}
+//     math::clear_dst_reg_addr();
+//     TTI_STALLWAIT(p_stall::STALL_CFG, p_stall::WAIT_SFPU);
+//     math::clear_addr_mod_base();
+// }
 #endif
 
 namespace NAMESPACE {
@@ -234,42 +234,22 @@ void MAIN {
     MATH(rope_tile_init(inv_d));
 
     uint32_t last_h = (uint32_t)-1;
-    bool need_pop = false;
-    int cached_populated = 0;
-    int idxs[32];
+    int* idxs_ptr = nullptr;
+    cb_wait_front(cb_in1, 1);
+    cb_get_tile(cb_in1, 0, &idxs_ptr);
+    idxs_ptr += 4; // Need to shift because read ptr is off by 1 << 4 bytes in BBE
+
 
     for(uint32_t active_id=active_begin; active_id<active_end; active_id++) {
-        uint32_t h = active_id / (n_tiles_width_active/2);
+        uint32_t b = active_id / (n_tiles_width_active/2) / n_tiles_height;
         uint32_t w = active_id % (n_tiles_width_active/2);
         cb_wait_front(cb_in0, 2);
         tile_regs_acquire();
 
-        if(last_h != h) {
-            int* idxs_ptr = nullptr;
-            if(need_pop) {
-                cb_pop_front(cb_in1, 1);
-            }
-            cb_wait_front(cb_in1, 1);
-            need_pop = true;
-            cb_get_tile(cb_in1, 0, &idxs_ptr);
-            idxs_ptr += 4; // Need to shift because read ptr is off by 1 << 4 bytes in BBE
-            last_h = h;
-            cached_populated = 0;
-
-            uint32_t real_height = h%n_tiles_height;
-            uint32_t valid_data_size = std::min(height_elements - real_height*32, uint32_t{32});
-            memcpy(idxs, idxs_ptr, valid_data_size * sizeof(int));
-            memset(idxs + valid_data_size, 0, (32 - valid_data_size) * sizeof(int));
-        }
-
-        if(cached_populated<2) {
-            MATH(rope_tile_precompute_pos(idxs));
-            cached_populated++;
-        }
         copy_tile_init(cb_in0);
         copy_tile(cb_in0, 0, 0);
         copy_tile(cb_in0, 1, 1);
-        MATH(rope_tile(idxs, inv_d, w*32));
+        MATH(rope_tile(idxs_ptr[b], inv_d, w*32));
         tile_regs_commit();
         tile_regs_wait();
 
@@ -282,9 +262,7 @@ void MAIN {
         cb_pop_front(cb_in0, 2);
     }
 
-    if(need_pop) {
-        cb_pop_front(cb_in1, 1);
-    }
+    cb_pop_front(cb_in1, 1);
 
 }
 }
