@@ -48,7 +48,7 @@ static CBHandle MakeCircularBufferBFP16(Program& program, const CoreSpec& core, 
 namespace ttggml {
 using namespace ttnn;
 struct RoPEOperation {
-    static ttnn::Tensor invoke(const Tensor& src_tensor, const Tensor& index_tensor, uint32_t active_dim_size);
+    static ttnn::Tensor invoke(const Tensor& src_tensor, const Tensor& index_tensor, uint32_t active_dim_size, float freq_base = 10000.0f);
 };
 constexpr auto rope = ttnn::register_operation<"ttggml::rope", ttggml::RoPEOperation>();
 
@@ -56,6 +56,7 @@ struct RoPEDeviceOperation {
     const tt::tt_metal::MemoryConfig output_mem_config;
     const tt::tt_metal::DataType output_dtype{};
     const uint32_t active_dim_size = 0;
+    const float freq_base = 10000.0f;
 
     void validate_with_output_tensors(
         const std::vector<Tensor>& input_tensors, const std::vector<std::optional<Tensor>>& output_tensors) const;
@@ -69,12 +70,13 @@ struct RoPEDeviceOperation {
 };
 }
 
-ttnn::Tensor ttggml::RoPEOperation::invoke(const Tensor& src_tensor, const Tensor& index_tensor, uint32_t active_dim_size) {
+ttnn::Tensor ttggml::RoPEOperation::invoke(const Tensor& src_tensor, const Tensor& index_tensor, uint32_t active_dim_size, float freq_base) {
     return tt::tt_metal::operation::run(
             RoPEDeviceOperation{
                 src_tensor.memory_config(),
                 src_tensor.dtype(),
-                active_dim_size
+                active_dim_size,
+                freq_base
             },
             {src_tensor, index_tensor},
             {},
@@ -91,12 +93,11 @@ std::vector<ttnn::TensorSpec> ttggml::RoPEDeviceOperation::compute_output_specs(
     const auto& input_tensor = input_tensors.at(0);
     return {TensorSpec(
         input_tensor.logical_shape(),
-        tt::tt_metal::TensorLayout::fromPaddedShape(
+        tt::tt_metal::TensorLayout(
             output_dtype,
             tt::tt_metal::PageConfig(input_tensor.layout()),
-            output_mem_config,
-            input_tensor.logical_shape(),
-            input_tensor.padded_shape()))};
+            output_mem_config)
+    )};
 }
 
 std::vector<ttnn::Tensor> ttggml::RoPEDeviceOperation::create_output_tensors(
@@ -136,6 +137,7 @@ void ttggml::RoPEDeviceOperation::validate_with_output_tensors(
 
     TT_FATAL(active_dim_size % 64 == 0, "active_dim must be a multiple of 64 (2 tiles)");
     TT_FATAL(active_dim_size < src_tensor.padded_shape()[-1], "active_dim must be less than the last dimension of the source tensor");
+    TT_FATAL(freq_base >= 0, "base_freq must be non-negative");
 }
 
 tt::tt_metal::operation::ProgramWithCallbacks ttggml::RoPEDeviceOperation::create_program(
@@ -188,6 +190,11 @@ tt::tt_metal::operation::ProgramWithCallbacks ttggml::RoPEDeviceOperation::creat
     MakeCircularBufferFP32(program, all_cores, tt::CBIndex::c_16, 4);
     MakeCircularBufferFP32(program, all_cores, tt::CBIndex::c_17, 4);
 
+    std::map<std::string, std::string> defines;
+    defines["FREQ_BASE"] = std::to_string(freq_base);
+    defines["FREQ_BASE_LOG"] = std::to_string(std::log(freq_base));
+    // defines["INV_D_ACTIVE_2"] = float(2.f / D_active); // don't know why this make things slower.
+
 
     std::vector<uint32_t> reader_compile_time_args;
     TensorAccessorArgs(*src).append_to(reader_compile_time_args);
@@ -208,6 +215,7 @@ tt::tt_metal::operation::ProgramWithCallbacks ttggml::RoPEDeviceOperation::creat
 
     KernelHandle compute = CreateKernel(program, "../ttrope/kernels/compute.cpp", all_cores, ComputeConfig{
         .fp32_dest_acc_en = true,
+        .defines = defines
     });
 
     uint32_t active_id = 0;

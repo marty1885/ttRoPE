@@ -131,6 +131,7 @@ int main()
     constexpr size_t D = 2048;
     constexpr size_t D_active = 256;
     constexpr size_t N = 32;
+    constexpr float freq_base = 10000.0f;
     static_assert(D % 32 == 0 && N % 32 == 0);
     static_assert(D >= D_active);
     constexpr uint32_t Dt = D/32;
@@ -189,6 +190,11 @@ int main()
     MakeCircularBufferFP32(program, all_cores, tt::CBIndex::c_16, 4);
     MakeCircularBufferFP32(program, all_cores, tt::CBIndex::c_17, 4);
 
+    std::map<std::string, std::string> defines;
+    defines["FREQ_BASE"] = std::to_string(freq_base);
+    defines["FREQ_BASE_LOG"] = std::to_string(std::log(freq_base));
+    // defines["INV_D_ACTIVE_2"] = float(2.f / D_active); // don't know why this make things slower.
+
 
     std::vector<uint32_t> reader_compile_time_args;
     TensorAccessorArgs(*src).append_to(reader_compile_time_args);
@@ -209,6 +215,7 @@ int main()
 
     KernelHandle compute = CreateKernel(program, "../ttrope/kernels/compute.cpp", all_cores, ComputeConfig{
         .fp32_dest_acc_en = true,
+        .defines = defines
     });
 
     uint32_t active_id = 0;

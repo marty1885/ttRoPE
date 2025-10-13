@@ -161,7 +161,7 @@ inline void rope_face(int* pos, float inv_d, int vec_offset, int face_idx)
 
 inline void rope_tile_init(float inv_d)
 {
-    vConstFloatPrgm0 = 9.21034037f;
+    vConstFloatPrgm0 = float(FREQ_BASE_LOG);
     vConstFloatPrgm1 = 1.14472988585f;
     vConstFloatPrgm2 = inv_d;
 }
