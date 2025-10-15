@@ -128,7 +128,7 @@ int main()
     auto& cq = device->mesh_command_queue();
 
     constexpr size_t B = 1;
-    constexpr size_t D = 2048;
+    constexpr size_t D = 256;
     constexpr size_t D_active = 256;
     constexpr size_t N = 32;
     constexpr float freq_base = 10000.0f;

@@ -1,3 +1,4 @@
+#include <tt-metalium/circular_buffer_config.hpp>
 #include <ttnn/decorators.hpp>
 #include <ttnn/run_operation.hpp>
 #include <ttnn/tensor/layout/layout.hpp>
@@ -5,6 +6,7 @@
 #include <ttnn/tensor/types.hpp>
 #include <ttnn/api/ttnn/device.hpp>
 #include <ttnn/operations/creation.hpp>
+#include <ttnn/operations/copy/typecast/typecast.hpp>
 #include <ttnn/operations/data_movement/tilize_with_val_padding/tilize_with_val_padding.hpp>
 
 using namespace tt::tt_metal;
@@ -34,14 +36,25 @@ static CBHandle MakeCircularBuffer(
     return CreateCircularBuffer(program, core, cb_src0_config);
 }
 
-static CBHandle MakeCircularBufferFP32(Program& program, const CoreSpec& core, tt::CBIndex cb, uint32_t n_tiles) {
-    constexpr uint32_t tile_size = sizeof(float) * TILE_WIDTH * TILE_HEIGHT;
-    return MakeCircularBuffer(program, core, cb, n_tiles * tile_size, tile_size, tt::DataFormat::Float32);
-}
+static CBHandle MakeCircularBuffer(Program& program, const CoreSpec& core, tt::CBIndex cb, uint32_t n_tiles, tt::tt_metal::DataType dtype)
+{
+    auto dt2dt = [](tt::tt_metal::DataType dt) {
+        switch(dt) {
+            case tt::tt_metal::DataType::FLOAT32: return tt::DataFormat::Float32;
+            case tt::tt_metal::DataType::BFLOAT16: return tt::DataFormat::Float16_b;
+            case tt::tt_metal::DataType::INT32: return tt::DataFormat::Int32;
+            case tt::tt_metal::DataType::BFLOAT8_B: return tt::DataFormat::Bfp8_b;
+            case tt::tt_metal::DataType::BFLOAT4_B: return tt::DataFormat::Bfp4_b;
+            case tt::tt_metal::DataType::UINT8: return tt::DataFormat::UInt8;
+            case tt::tt_metal::DataType::UINT16: return tt::DataFormat::UInt16;
+            case tt::tt_metal::DataType::UINT32: return tt::DataFormat::UInt32;
+            default:
+                TT_FATAL(false, "Unsupported data type: {}", static_cast<int>(dt));
+        }
+    };
 
-static CBHandle MakeCircularBufferBFP16(Program& program, const CoreSpec& core, tt::CBIndex cb, uint32_t n_tiles) {
-    constexpr uint32_t tile_size = sizeof(bfloat16) * TILE_WIDTH * TILE_HEIGHT;
-    return MakeCircularBuffer(program, core, cb, n_tiles * tile_size, tile_size, tt::DataFormat::Float16_b);
+    auto tile_size = tt::tile_size(dt2dt(dtype));
+    return MakeCircularBuffer(program, core, cb, n_tiles*tile_size, tile_size, dt2dt(dtype));
 }
 
 
@@ -135,7 +148,7 @@ void ttggml::RoPEDeviceOperation::validate_with_output_tensors(
     }
 
     TT_FATAL(active_dim_size % 64 == 0, "active_dim must be a multiple of 64 (2 tiles)");
-    TT_FATAL(active_dim_size < src_tensor.padded_shape()[-1], "active_dim must be less than the last dimension of the source tensor");
+    TT_FATAL(active_dim_size <= src_tensor.padded_shape()[-1], "active_dim must be less than the last dimension of the source tensor");
     TT_FATAL(freq_base >= 0, "base_freq must be non-negative");
 }
 
@@ -158,9 +171,9 @@ tt::tt_metal::operation::ProgramWithCallbacks ttggml::RoPEDeviceOperation::creat
     auto idxs = index_tensor.buffer();
     auto dst = output_tensor.buffer();
 
-    const uint32_t Dt = D/32;
-    const uint32_t Nt = N/32;
-    const uint32_t D_activet = D_active/32;
+    const uint32_t Dt = D/32 + (D % 32 != 0);
+    const uint32_t Nt = N/32 + (N % 32 != 0);
+    const uint32_t D_activet = D_active/32; // This must divide cleanly
 
     auto core_grid = device->compute_with_storage_grid_size();
 
@@ -184,10 +197,10 @@ tt::tt_metal::operation::ProgramWithCallbacks ttggml::RoPEDeviceOperation::creat
     // Combine the two groups of cores
     auto all_cores = all_cores_active.merge(all_cores_passive);
 
-    MakeCircularBufferFP32(program, all_cores, tt::CBIndex::c_0, 4);
+    MakeCircularBuffer(program, all_cores, tt::CBIndex::c_0, 4, src_tensor.dtype());
     MakeCircularBuffer(program, all_cores, tt::CBIndex::c_1, B*sizeof(int32_t), B*sizeof(int32_t), tt::DataFormat::Int32);
-    MakeCircularBufferFP32(program, all_cores, tt::CBIndex::c_16, 4);
-    MakeCircularBufferFP32(program, all_cores, tt::CBIndex::c_17, 4);
+    MakeCircularBuffer(program, all_cores, tt::CBIndex::c_16, 4, src_tensor.dtype());
+    MakeCircularBuffer(program, all_cores, tt::CBIndex::c_17, 4, output_tensor.dtype());
 
     std::map<std::string, std::string> defines;
     defines["FREQ_BASE"] = std::to_string(freq_base);
@@ -280,9 +293,10 @@ tt::tt_metal::operation::ProgramWithCallbacks ttggml::RoPEDeviceOperation::creat
 int main()
 {
     auto device = ttnn::open_mesh_device(0);
-    auto src = ttnn::ones(ttnn::Shape({1, 32, 2048}), DataType::FLOAT32, Layout::TILE, *device);
+    auto src = ttnn::ones(ttnn::Shape({1, 1, 64}), DataType::FLOAT32, Layout::TILE, *device);
+    src = ttnn::typecast(src, DataType::BFLOAT16);
     auto idx = ttnn::ones(ttnn::Shape({1}), DataType::INT32, Layout::ROW_MAJOR, *device);
-    auto res = ttggml::rope(src, idx, 256);
+    auto res = ttggml::rope(src, idx, 64);
     std::cout << res.write_to_string() << std::endl;
 
     device->close();

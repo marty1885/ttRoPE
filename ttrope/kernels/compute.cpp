@@ -233,7 +233,6 @@ void MAIN {
     float inv_d = 1.f/(n_tiles_width_active * (32 / 2));
     MATH(rope_tile_init(inv_d));
 
-    uint32_t last_h = (uint32_t)-1;
     int* idxs_ptr = nullptr;
     cb_wait_front(cb_in1, 1);
     cb_get_tile(cb_in1, 0, &idxs_ptr);
