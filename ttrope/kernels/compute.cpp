@@ -3,6 +3,7 @@
 #include "compute_kernel_api/eltwise_unary/eltwise_unary.h"
 #include "compute_kernel_api/eltwise_unary/exp.h"
 #include "compute_kernel_api/eltwise_unary/recip.h"
+#include "compute_kernel_api/eltwise_unary/identity.h"
 #include "compute_kernel_api/eltwise_unary/trigonometry.h"
 #include <string.h>
 
@@ -86,33 +87,22 @@ inline vFloat vector_sin_phase(vFloat x)
     return v;
 }
 
-// Each vInt is really treated as if it's a 8x4(width=8, height=4) block in SFPU and interacting with Dst
-// This function takes in a pointer `ptr` and load each integer into one of the rows of a vInt
-// int*      vInt
-// a         aaaaaaaa
-// b         bbbbbbbb
-// c    ->   cccccccc
-// d         dddddddd
-inline vInt load_into_row(int* ptr)
-{
-    vInt row_mask = vConstTileId & (~15);
-    vInt v = ptr[0];
-    v_if(row_mask == 16) {
-        v = ptr[1];
+#ifdef EXT_FACTOR
+sfpi_inline vFloat rope_yarn_ramp(vFloat vec_pos) {
+    vFloat y = (vec_pos - CORR_DIMS0) * (1.f / std::max(0.001f, float(CORR_DIMS1 - CORR_DIMS0)));
+    v_if(y < 0.f) {
+        y = 0;
     }
-    v_elseif(row_mask == 32) {
-        v = ptr[2];
-    }
-    v_elseif(row_mask == 48) {
-        v = ptr[3];
+    v_elseif(y > 1.f) {
+        y = 1;
     }
     v_endif;
-    return v;
+    return 1.f - y;
 }
+#endif
 
-inline void rope_face(int pos, float inv_d, int vec_offset, int face_idx)
+inline void rope_face(int pos, int face_idx, int pos_in_vector)
 {
-    DeviceZoneScopedN("ROPE-FACE");
     // RoPE - we need to calculate the final rotation sin(angle) and cos(angle)
     // Where andgle = pos * freq
     // and freq = pow(100000, 2.0f * i / DIM_SIZE)
@@ -137,20 +127,19 @@ inline void rope_face(int pos, float inv_d, int vec_offset, int face_idx)
     //      vConstFloatPrg2. Reused across the kernel.
     // TODO: DIM_SIZE should be treated as a constant and this 1.f/DIM_SIZE can be
     //      evaulated at compile time.
-    int face_row = face_idx / 2;
     int face_col = face_idx % 2;
     int dst_offset = face_idx*8;
+    vFloat vpos = int32_to_float(pos);
     for (int h = 0; h < 2; h++) {
-        vFloat freq = dst_reg[64+8+face_col*2+h];
+        vFloat freq = dst_reg[64+face_col*2+h];
+        vFloat mscale = dst_reg[64+face_col*2+h+4];
+
+        // Standard RoPE math
+        vFloat angle_phase = vpos * freq;
+        vFloat sin_value = vector_sin_phase(angle_phase) * mscale;
+        vFloat cos_value = vector_sin_phase(0.5f - angle_phase) * mscale;
         for (int i = 0; i < 4; i++) {
-            vFloat vpos = int32_to_float(pos);
-
-            // Standard RoPE math
-            vFloat angle_phase = vpos * freq;
-            vFloat sin_value = vector_sin_phase(angle_phase);
-            vFloat cos_value = vector_sin_phase(0.5f - angle_phase);
-
-            size_t idx = i*2+h;
+            int idx = i*2+h;
             vFloat x = dst_reg[dst_offset+idx];
             vFloat y = dst_reg[dst_offset+idx+32];
             dst_reg[dst_offset+idx] = x * cos_value - y * sin_value;
@@ -169,7 +158,6 @@ inline void rope_tile_init(float inv_d)
 inline void rope_tile(int pos, float inv_d, int vec_offset)
 {
     (void)inv_d; // Unused
-    DeviceZoneScopedN("ROPE-TILE");
     math::set_dst_write_addr<DstTileLayout::Default, DstTileShape::Tile32x32>(0);
     math::set_addr_mod_base();
     TTI_STALLWAIT(p_stall::STALL_SFPU, p_stall::MATH);
@@ -182,13 +170,31 @@ inline void rope_tile(int pos, float inv_d, int vec_offset)
 
         vFloat term_to_exp = -exponent * vConstFloatPrgm0 - vConstFloatPrgm1;
         vFloat freq = vector_exp(term_to_exp);
-        dst_reg[64+8+i] = freq;
+
+        vFloat freq_scaled = freq;
+        vFloat mscale = 1.f;
+        #ifdef FREQ_SCALE
+            freq_scaled = freq * FREQ_SCALE;
+        #endif
+        #ifdef ATTN_FACTOR
+            mscale = ATTN_FACTOR;
+        #endif
+        vFloat theta = freq_scaled;
+        // enable YaRN if needed
+        #ifdef EXT_FACTOR
+            vFloat ramp_mix = rope_yarn_ramp(block_lane_id) * EXT_FACTOR;
+            theta = freq_scaled * (1 - ramp_mix) + freq * ramp_mix;
+            #ifdef LOG_1_FREQ_SCALE
+                mscale *= 1.0f + 0.1f * LOG_1_FREQ_SCALE;
+            #endif // else mscahe *= 1 (the other half collasps to 0) - does nothing
+        #endif
+        dst_reg[64+i] = theta;
+        dst_reg[64+i+4] = mscale;
     }
 
     for (int face = 0; face < 4; face++) {
-        int internal_offset = ((face % 2 == 0) ? 0 : 16);
-        int idx_offset = face > 1 ? 16 : 0;
-        rope_face(pos, inv_d, vec_offset + internal_offset, face);
+        int pos_in_vector = vec_offset + ((face % 2 == 0) ? 0 : 16);
+        rope_face(pos, face, pos_in_vector);
     }
 
     math::clear_dst_reg_addr();
@@ -196,22 +202,6 @@ inline void rope_tile(int pos, float inv_d, int vec_offset)
     math::clear_addr_mod_base();
 }
 
-// inline void rope_tile_precompute_pos(int* pos)
-// {
-//     DeviceZoneScopedN("ROPE-TILE-PRECOMP-POS");
-//     math::set_dst_write_addr<DstTileLayout::Default, DstTileShape::Tile32x32>(0);
-//     math::set_addr_mod_base();
-//     TTI_STALLWAIT(p_stall::STALL_SFPU, p_stall::MATH);
-
-//     for (int i=0;i<8;i++) {
-//         vFloat vpos = int32_to_float(load_into_row(pos+i*4));
-//         dst_reg[64+i] = vpos;
-//     }
-
-//     math::clear_dst_reg_addr();
-//     TTI_STALLWAIT(p_stall::STALL_CFG, p_stall::WAIT_SFPU);
-//     math::clear_addr_mod_base();
-// }
 #endif
 
 namespace NAMESPACE {
@@ -239,13 +229,14 @@ void MAIN {
     idxs_ptr += 4; // Need to shift because read ptr is off by 1 << 4 bytes in BBE
 
 
+    copy_tile_init(cb_in0);
+    pack_reconfig_data_format(cb_out0);
     for(uint32_t active_id=active_begin; active_id<active_end; active_id++) {
         uint32_t b = active_id / (n_tiles_width_active/2) / n_tiles_height;
         uint32_t w = active_id % (n_tiles_width_active/2);
         cb_wait_front(cb_in0, 2);
         tile_regs_acquire();
 
-        copy_tile_init(cb_in0);
         copy_tile(cb_in0, 0, 0);
         copy_tile(cb_in0, 1, 1);
         MATH(rope_tile(idxs_ptr[b], inv_d, w*32));
@@ -253,7 +244,6 @@ void MAIN {
         tile_regs_wait();
 
         cb_reserve_back(cb_out0, 2);
-        pack_reconfig_data_format(cb_out0);
         pack_tile(0, cb_out0, 0);
         pack_tile(1, cb_out0, 1);
         tile_regs_release();
